@@ -103,7 +103,7 @@ how it was assembled.
 - [x] Step 1 — `src/windows.py` + its tests (time windows)
 - [x] Step 2 — `src/generate.py` (scenario generator, hard + easy)
 - [x] Step 3 — `src/features.py`
-- [ ] Step 4 — `src/detect.py`
+- [x] Step 4 — `src/detect.py`
 - [ ] Step 5 — `src/attribute.py` (V5, the core)
 - [ ] Step 6 — `src/evaluate.py` (the results table)
 - [ ] Step 7 — `src/report.py` (local LLM brief + validation)
