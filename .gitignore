@@ -32,6 +32,7 @@ Thumbs.db
 # These are re-creatable with `python -m src.generate`, so they are not
 # committed. The folders themselves are kept via .gitkeep.
 data/*.parquet
+data/*.meta.json
 groundtruth/*.json
 results/*.csv
 results/*.json
@@ -39,5 +40,6 @@ results/*.json
 # ...except the frozen demo run, which IS committed so the dashboard's
 # replay mode always works with nothing connected.
 !data/demo_*.parquet
+!data/demo_*.meta.json
 !groundtruth/demo_*.json
 !results/demo_*.json
