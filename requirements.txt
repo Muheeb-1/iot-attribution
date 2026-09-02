@@ -9,7 +9,8 @@ networkx==3.4.2          # the directed attack graph (step 5)
 
 # Report layer (step 7)
 pydantic==2.10.3         # forces the LLM output into a fixed shape
-requests==2.32.3         # talks to the local Ollama server
+ollama==0.6.0            # local LLM client; format= enforces the JSON schema
+requests==2.32.3         # plain HTTP, used only to check the server is awake
 
 # Dashboard (step 8)
 streamlit==1.40.2

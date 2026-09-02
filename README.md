@@ -114,6 +114,38 @@ prototype exactly.
 V5 is right about three times as often as the best standard approach on the
 hard benchmark, and when it is unsure it says so instead of guessing.
 
+## The incident brief, and why it can be trusted
+
+The last stage hands the findings to a local language model (`qwen3:4b` via
+Ollama) to turn into plain English a non-expert can act on. Language models
+invent things, so two guards sit around it:
+
+1. **The shape is forced.** The brief is a pydantic model, and that model's
+   JSON schema is passed to Ollama as `format=`. The model physically cannot
+   return prose, a missing field, or a different structure.
+2. **The facts are checked.** Before anything is shown, every evidence id,
+   device name, address, port, timestamp and byte figure in the text is
+   checked against the evidence that was passed in. Anything invented is
+   rejected and the brief is regenerated once. Reject twice and the system
+   abandons the model, falls back to a plain template, and marks the brief
+   `LLM_FALLBACK` so nobody mistakes it for generated text.
+
+Nothing unverified is ever displayed. The fallback rate is measured, not
+hoped for. Over 20 hard runs with `qwen3:4b`:
+
+| outcome | share |
+|---|---:|
+| passed validation first time | 55% |
+| passed after one regeneration | 15% |
+| rejected twice, fell back to the plain template | 30% |
+
+In roughly a third of runs the model cannot produce a brief this project is
+willing to show, and the reader gets the template instead. That is the system
+working, not failing - the alternative is displaying a confident brief that
+cites an evidence id which does not exist. Full workings, including a
+false-positive bug the first measurement exposed in the validator itself, are
+in `results/report_validation.md`.
+
 ## Getting started
 
 ```bash
@@ -135,5 +167,5 @@ how it was assembled.
 - [x] Step 4 — `src/detect.py`
 - [x] Step 5 — `src/attribute.py` (V5, the core)
 - [x] Step 6 — `src/evaluate.py` (the results table)
-- [ ] Step 7 — `src/report.py` (local LLM brief + validation)
+- [x] Step 7 — `src/report.py` (local LLM brief + validation)
 - [ ] Step 8 — `dashboard/app.py` (Streamlit, with offline replay)
