@@ -102,7 +102,7 @@ how it was assembled.
 - [x] Setup: environment, folders, git, this README
 - [x] Step 1 — `src/windows.py` + its tests (time windows)
 - [x] Step 2 — `src/generate.py` (scenario generator, hard + easy)
-- [ ] Step 3 — `src/features.py`
+- [x] Step 3 — `src/features.py`
 - [ ] Step 4 — `src/detect.py`
 - [ ] Step 5 — `src/attribute.py` (V5, the core)
 - [ ] Step 6 — `src/evaluate.py` (the results table)
