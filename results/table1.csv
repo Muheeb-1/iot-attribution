@@ -1,0 +1,19 @@
+scenario,detector,method,runs,top1_pct,top3_pct,mean_rank,never_ranked,abstention_pct
+hard,as prototype,B1 total bytes,30,0.0,10.0,6.07,0,
+hard,as prototype,B2 anomaly score,30,10.0,46.7,4.1,0,
+hard,as prototype,B3 connection count,30,3.3,10.0,5.63,0,
+hard,as prototype,B4 earliest onset,30,16.7,53.3,3.27,0,
+hard,as prototype,V5 attribution,30,53.3,90.0,2.0,0,16.7
+hard,weighted (fairness check),B1 total bytes,30,0.0,10.0,6.07,0,
+hard,weighted (fairness check),B2 anomaly score,30,10.0,50.0,3.93,0,
+hard,weighted (fairness check),B3 connection count,30,3.3,10.0,5.63,0,
+hard,weighted (fairness check),B4 earliest onset,30,16.7,50.0,3.2,0,
+easy,as prototype,B1 total bytes,30,13.3,46.7,3.5,0,
+easy,as prototype,B2 anomaly score,30,10.0,43.3,3.57,0,
+easy,as prototype,B3 connection count,30,13.3,83.3,3.13,0,
+easy,as prototype,B4 earliest onset,30,50.0,100.0,1.57,0,
+easy,as prototype,V5 attribution,30,90.0,100.0,1.1,0,6.7
+easy,weighted (fairness check),B1 total bytes,30,13.3,46.7,3.5,0,
+easy,weighted (fairness check),B2 anomaly score,30,10.0,63.3,2.87,0,
+easy,weighted (fairness check),B3 connection count,30,13.3,83.3,3.13,0,
+easy,weighted (fairness check),B4 earliest onset,30,60.0,100.0,1.47,0,

@@ -527,7 +527,9 @@ def attribute(
         confidence = max(confidence, indicator_gap)
 
     shortlist = reranked[:SHORTLIST]
-    abstained = confidence < abstain_below
+    # bool() not numpy bool: this value gets written to JSON by the report
+    # layer, and json.dumps refuses a numpy type.
+    abstained = bool(confidence < abstain_below)
 
     return Attribution(
         ranking=reranked,

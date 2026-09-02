@@ -43,3 +43,8 @@ results/*.json
 !data/demo_*.meta.json
 !groundtruth/demo_*.json
 !results/demo_*.json
+
+# ...and the headline results table, which IS the project's finding and
+# should be readable in the repository without re-running anything.
+!results/table1.csv
+!results/per_run.csv

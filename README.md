@@ -85,6 +85,35 @@ The real project rebuilds **V5** properly, in separate testable files, and must
 reproduce those numbers. If it does not, something is broken and we want to
 know.
 
+## Results
+
+Measured over 30 runs of each benchmark (`python -m src.evaluate --runs 30`,
+saved to `results/table1.csv`). Every hard-benchmark figure reproduces the
+prototype exactly.
+
+### Hard benchmark - 12 devices, decoys, stealthy attacker, 40% relayed hops
+
+| method | top-1 | top-3 | mean rank | abstained |
+|---|---:|---:|---:|---:|
+| B1 blame the biggest sender | 0% | 10% | 6.07 | - |
+| B2 blame the strangest-looking | 10% | 47% | 4.10 | - |
+| B3 blame the busiest | 3% | 10% | 5.63 | - |
+| B4 blame whoever went odd first | 17% | 53% | 3.27 | - |
+| **V5 attribution** | **53%** | **90%** | **2.00** | 17% |
+
+### Easy benchmark - 7 devices, no decoys, no relayed hops
+
+| method | top-1 | top-3 | mean rank | abstained |
+|---|---:|---:|---:|---:|
+| B1 blame the biggest sender | 13% | 47% | 3.50 | - |
+| B2 blame the strangest-looking | 10% | 43% | 3.57 | - |
+| B3 blame the busiest | 13% | 83% | 3.13 | - |
+| B4 blame whoever went odd first | 50% | 100% | 1.57 | - |
+| **V5 attribution** | **90%** | **100%** | **1.10** | 7% |
+
+V5 is right about three times as often as the best standard approach on the
+hard benchmark, and when it is unsure it says so instead of guessing.
+
 ## Getting started
 
 ```bash
@@ -105,6 +134,6 @@ how it was assembled.
 - [x] Step 3 — `src/features.py`
 - [x] Step 4 — `src/detect.py`
 - [x] Step 5 — `src/attribute.py` (V5, the core)
-- [ ] Step 6 — `src/evaluate.py` (the results table)
+- [x] Step 6 — `src/evaluate.py` (the results table)
 - [ ] Step 7 — `src/report.py` (local LLM brief + validation)
 - [ ] Step 8 — `dashboard/app.py` (Streamlit, with offline replay)
