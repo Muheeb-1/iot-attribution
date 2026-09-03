@@ -155,6 +155,29 @@ pip install -r requirements.txt
 pytest -q                       # all tests must pass
 ```
 
+## Running the dashboard
+
+```bash
+streamlit run dashboard/app.py
+```
+
+It opens at <http://localhost:8501>. One page: the network as a diagram with
+the attack path in red, a timeline of when each device went abnormal, the
+ranked suspects with confidence bars, and the incident brief.
+
+**Replay mode is on by default.** It reads a capture already saved in `data/`
+and skips the language model, so the page works with nothing connected — no
+internet, no Ollama. The full analysis still runs for real; every number on the
+page is computed live from the traffic. Turn replay mode off in the sidebar to
+have the brief written by `qwen3:4b`.
+
+If `data/` is empty, generate some captures first:
+
+```bash
+python -m src.generate --runs 30
+python -m src.generate --runs 30 --easy
+```
+
 ## Project status
 
 Built in numbered steps; each step is committed separately so the history shows
@@ -168,4 +191,4 @@ how it was assembled.
 - [x] Step 5 — `src/attribute.py` (V5, the core)
 - [x] Step 6 — `src/evaluate.py` (the results table)
 - [x] Step 7 — `src/report.py` (local LLM brief + validation)
-- [ ] Step 8 — `dashboard/app.py` (Streamlit, with offline replay)
+- [x] Step 8 — `dashboard/app.py` (Streamlit, with offline replay)

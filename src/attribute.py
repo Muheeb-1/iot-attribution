@@ -165,6 +165,26 @@ class Attribution:
     def top(self) -> str | None:
         return self.ranking[0] if self.ranking else None
 
+    @property
+    def confidence_percent(self) -> int:
+        """
+        Confidence as a whole percentage, for showing to a person. CLAMPED to
+        0-100.
+
+        The raw `confidence` is not a probability and is not bounded above.
+        The second stage measures the gap between the top two indicator
+        scores as (best - second) / (|best| + 1), which exceeds 1.0 whenever
+        the runner-up scores negatively - it happened in 10 of our 60 saved
+        runs, the worst reading 1.50.
+
+        As a ranking signal that is fine, and it is left exactly as it is,
+        because the abstain decision and every published accuracy figure are
+        computed from the raw value. As something to put in front of a site
+        manager it is not: "150% confident" is not a sentence anybody should
+        read. So display goes through here, and the decision-making does not.
+        """
+        return int(round(max(0.0, min(1.0, self.confidence)) * 100))
+
     def edge_evidence(self) -> list:
         """Every link we drew, as plain dictionaries - for the brief and the UI."""
         out = []

@@ -480,3 +480,50 @@ def test_a_device_outside_the_shortlist_keeps_its_story_order():
     tail_final = result.ranking[attribute.SHORTLIST:]
     tail_story = result.story_ranking[attribute.SHORTLIST:]
     assert tail_final == tail_story
+
+
+# --------------------------------------------------------------------------
+# Confidence: a ranking signal, and separately a thing shown to a person
+# --------------------------------------------------------------------------
+
+def test_the_raw_confidence_is_left_unbounded():
+    """
+    The second stage measures the indicator gap as (best - second) /
+    (|best| + 1), which exceeds 1.0 when the runner-up scores negatively. That
+    is inherited from the prototype and must NOT be changed: the abstain
+    decision and every published accuracy figure are computed from it, so
+    clamping it here would quietly alter the results.
+    """
+    result = attribute.Attribution(confidence=1.5, ranking=["a", "b"])
+    assert result.confidence == 1.5
+
+
+def test_the_displayed_confidence_is_clamped_to_a_sensible_percentage():
+    """
+    "150% confident" is not a sentence anybody should read, least of all the
+    non-expert this project is written for. Display goes through here; the
+    decision-making does not.
+    """
+    assert attribute.Attribution(confidence=1.5).confidence_percent == 100
+    assert attribute.Attribution(confidence=0.67).confidence_percent == 67
+    assert attribute.Attribution(confidence=0.0).confidence_percent == 0
+    assert attribute.Attribution(confidence=-0.2).confidence_percent == 0
+
+
+def test_clamping_does_not_disturb_the_abstain_decision():
+    """The threshold is applied to the raw value, so a clamp cannot move it."""
+    below = attribute.Attribution(confidence=0.10)
+    above = attribute.Attribution(confidence=1.50)
+    assert below.confidence < attribute.ABSTAIN_BELOW
+    assert above.confidence > attribute.ABSTAIN_BELOW
+    assert above.confidence_percent == 100
+
+
+def test_real_runs_never_display_an_impossible_percentage():
+    for run_id in runs.list_runs()[:12]:
+        run = runs.load_run(run_id)
+        detection = detect.detect_run(run)
+        result = attribute.attribute_run(run, detection)
+        assert 0 <= result.confidence_percent <= 100, (
+            "%s would display %d%%" % (run_id, result.confidence_percent)
+        )

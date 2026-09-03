@@ -177,7 +177,8 @@ def build_evidence(run: runs.Run, detection: detect.Detection,
     connections = run.connections
 
     verdict = "abstain" if result.abstained else "named"
-    confidence_pct = int(round(result.confidence * 100))
+    # Clamped for display - see Attribution.confidence_percent.
+    confidence_pct = result.confidence_percent
 
     devices = []
     for name in run.device_names:
