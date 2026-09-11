@@ -1,0 +1,580 @@
+"""
+CAPTURE - turning a real Wireshark recording into the same table the simulator writes.
+
+WHAT THIS FILE DOES
+-------------------
+Everything downstream of step 3 - features, detection, attribution, the brief,
+the dashboard - reads one thing: a flow table with these columns
+
+    conn_id  t  src  dst  dport  bytes_out  bytes_in  pkts
+
+src/generate.py invents that table. This file measures it, from a .pcapng
+recorded off the lab network. Nothing else in the pipeline changes. That is
+the whole point: if the attribution method only works on traffic I made up,
+it is not a result, it is a tautology. Pointing the same untouched pipeline
+at a real capture is what turns it into a claim about the world.
+
+    real packets  ->  tshark  ->  flows  ->  the exact same table
+
+WHAT A "FLOW" IS HERE
+---------------------
+A pcap is packets; the table wants connections. One row per flow, where a
+flow is one conversation between two endpoints:
+
+    TCP    one connection. A fresh SYN starts a new row even if the port
+           pair repeats, because an ESP32 that reconnects to the broker
+           forty times has made forty connections, and collapsing them
+           would hide exactly the reconnect-storm behaviour worth seeing.
+    UDP    packets sharing both endpoints and both ports.
+    other  ARP, ICMP, anything without ports: grouped by the two endpoints.
+           ARP is kept rather than dropped - a device suddenly ARPing its
+           way across the subnet is lateral movement, and it is the one
+           place that shows up first.
+
+Any flow is closed after IDLE_SECONDS of silence, and a later packet opens a
+new one. Without that, a device that broadcasts every thirty seconds for the
+whole capture produces a single row spanning the entire recording, which is
+useless to a per-window feature table.
+
+WHO SENT IT: MAC, NOT IP
+------------------------
+Rows are keyed on the sender's hardware address. IP addresses are handed out
+by the router and change between sessions; on this network 192.168.0.129 is
+esp32-01 today and need not be tomorrow. The MAC is burned into the chip. An
+attribution result that says "192.168.0.129 did it" is a result about a DHCP
+lease, which is not a thing anyone can go and unplug.
+
+The identity of the far end is resolved the same way when it is one of ours,
+and otherwise left as the literal IP. That is deliberate: features.py decides
+"outside the lab" by asking whether a destination is in the asset inventory,
+so an unrecognised address must stay unrecognisable rather than being tidied
+into some friendly name.
+
+TWO HONEST DIFFERENCES FROM THE SIMULATOR
+-----------------------------------------
+1. bytes_out/bytes_in are WIRE bytes - full frames, headers included - because
+   that is what a capture actually contains. The simulator's byte counts are
+   nominal payload. So absolute volumes are not comparable between a simulated
+   run and a captured one. Everything the detector does is relative to each
+   device's own baseline, so this does not affect it, but it is the reason a
+   captured run's raw numbers look different from a simulated one's.
+
+2. A real capture is minutes long, not six hours, and the baseline has to be
+   cut from it proportionally. The default is the first half. Say so out loud
+   in the meta file rather than pretending a three-hour baseline exists.
+
+USAGE
+-----
+    python -m src.capture pcap/data1.pcapng              # -> next free data/run_NNN
+    python -m src.capture pcap/data1.pcapng --run run_009
+    python -m src.capture pcap/data1.pcapng --rows 10    # print the first rows
+"""
+
+from __future__ import annotations
+
+import argparse
+import json
+import shutil
+import subprocess
+import sys
+from datetime import datetime, timezone
+from pathlib import Path
+
+import pandas as pd
+
+from src import runs, windows
+
+ROOT = Path(__file__).resolve().parents[1]
+
+# --------------------------------------------------------------------------
+# The lab's asset inventory.
+#
+# This is the one piece of knowledge that cannot be measured from the packets
+# and has to be written down by hand - which is exactly the situation every
+# real security team is in, and why features.py is allowed to use it. It is
+# not the answer sheet: it says which machines are ours, not which one is
+# compromised.
+#
+# Each of these was confirmed from the capture itself rather than assumed:
+# the three sensors announce their own names as MQTT client IDs (and esp32-01
+# also as a DHCP hostname, esp32-C3C010), and the broker is the endpoint every
+# one of them opens port 1883 to.
+# --------------------------------------------------------------------------
+MAC_TO_NAME = {
+    "1c:c3:ab:c3:c0:10": "esp32-01",   # 192.168.0.129
+    "30:76:f5:e4:eb:60": "esp32-02",   # 192.168.0.160
+    "30:76:f5:e5:e5:ac": "esp32-03",   # 192.168.0.203
+    "cc:28:aa:75:4e:bd": "broker",     # 192.168.0.200
+}
+
+# A second way to recognise the broker. If it is ever reached through the
+# router - or swapped for another machine on the same address - the MAC will
+# not match but the address still identifies the service.
+IP_TO_NAME = {
+    "192.168.0.200": "broker",
+}
+
+# The suspects. The broker is infrastructure, not a suspect: it talks to
+# everything by design, so including it would mean attributing the incident
+# to the message queue. generate.py leaves it out of device_names for the
+# same reason, and features.py only ever builds rows for names on this list.
+DEVICE_KINDS = {
+    "esp32-01": "sensor",
+    "esp32-02": "sensor",
+    "esp32-03": "sensor",
+}
+
+# Close a flow after this much silence. 60s matches the feature window, so a
+# flow never silently straddles more windows than the thing measuring it.
+IDLE_SECONDS = 60.0
+
+# Frames sent to everybody. Named rather than left as raw addresses so a
+# broadcast storm reads as one destination in the table instead of many.
+BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
+BROADCAST_NAME = "broadcast"
+
+# Exactly the columns generate.py writes, in exactly that order.
+COLUMNS = ["conn_id", "t", "src", "dst", "dport", "bytes_out", "bytes_in", "pkts"]
+
+# The fields pulled out of each packet. occurrence=f (first) matters: a frame
+# with tunnelled or nested layers reports several ip.src values, and we want
+# the outermost one rather than a tab-separated pair that parses as neither.
+TSHARK_FIELDS = [
+    "frame.time_epoch",
+    "frame.len",
+    "eth.src",
+    "eth.dst",
+    "ip.src",
+    "ip.dst",
+    "ipv6.src",
+    "ipv6.dst",
+    "ip.proto",
+    "tcp.srcport",
+    "tcp.dstport",
+    "tcp.flags.syn",
+    "tcp.flags.ack",
+    "udp.srcport",
+    "udp.dstport",
+    "arp.opcode",
+]
+
+
+# --------------------------------------------------------------------------
+# Finding and running tshark
+# --------------------------------------------------------------------------
+
+def find_tshark(explicit: str | None = None) -> str:
+    """
+    Locate tshark.
+
+    Wireshark's Windows installer does not put tshark on PATH, so looking only
+    there fails on the machine this was written on. Check PATH first anyway -
+    if the user has arranged for a particular tshark, that is the one they
+    mean - then the standard install locations.
+    """
+    if explicit:
+        if not Path(explicit).exists():
+            raise FileNotFoundError("no tshark at %s" % explicit)
+        return explicit
+
+    found = shutil.which("tshark")
+    if found:
+        return found
+
+    candidates = [
+        r"C:\Program Files\Wireshark\tshark.exe",
+        r"C:\Program Files (x86)\Wireshark\tshark.exe",
+        "/usr/bin/tshark",
+        "/usr/local/bin/tshark",
+        "/opt/homebrew/bin/tshark",
+    ]
+    for candidate in candidates:
+        if Path(candidate).exists():
+            return candidate
+
+    raise FileNotFoundError(
+        "tshark not found. It ships with Wireshark (https://www.wireshark.org).\n"
+        "If it is installed somewhere unusual, pass --tshark PATH."
+    )
+
+
+def read_packets(pcap_path: Path, tshark: str) -> list[dict]:
+    """
+    One pass over the capture, one dict per packet.
+
+    tshark is asked for tab-separated fields rather than JSON or XML because
+    the capture can be large and this is the only output format that streams
+    cheaply. Missing fields come back as empty strings, which the parsers
+    below treat as "not applicable" rather than zero - a packet with no TCP
+    layer has no port, and calling that port 0 would silently merge it with
+    real traffic.
+    """
+    command = [tshark, "-r", str(pcap_path), "-T", "fields",
+               "-E", "separator=/t", "-E", "occurrence=f"]
+    for field in TSHARK_FIELDS:
+        command += ["-e", field]
+
+    result = subprocess.run(command, capture_output=True, text=True)
+    if result.returncode != 0:
+        raise RuntimeError(
+            "tshark failed reading %s:\n%s" % (pcap_path, result.stderr.strip())
+        )
+
+    packets = []
+    for line in result.stdout.splitlines():
+        if not line.strip():
+            continue
+        parts = line.split("\t")
+        # Trailing empty fields can be dropped by tshark; pad rather than
+        # index-error on a packet that simply had nothing in its last field.
+        parts += [""] * (len(TSHARK_FIELDS) - len(parts))
+        packets.append(dict(zip(TSHARK_FIELDS, parts)))
+    return packets
+
+
+# --------------------------------------------------------------------------
+# Naming the two ends of a packet
+# --------------------------------------------------------------------------
+
+def _int_or_none(text):
+    try:
+        return int(text)
+    except (TypeError, ValueError):
+        return None
+
+
+def endpoint_name(mac: str, ip: str) -> str:
+    """
+    Who this address belongs to.
+
+    MAC first, because that is the identity that survives a DHCP lease. Then
+    the IP table, which covers the broker being reached some other way. Then
+    the literal address, and only if there is not one, the literal MAC.
+
+    Returning the raw address for strangers is the point, not a fallback:
+    features.py counts destinations that are new AND not in the inventory, so
+    an unknown address has to stay visibly unknown.
+    """
+    mac = (mac or "").lower()
+    if mac in MAC_TO_NAME:
+        return MAC_TO_NAME[mac]
+    if mac == BROADCAST_MAC:
+        return BROADCAST_NAME
+    if ip and ip in IP_TO_NAME:
+        return IP_TO_NAME[ip]
+    if ip:
+        return ip
+    if mac.startswith(("01:00:5e", "33:33")):
+        # IPv4 / IPv6 multicast, which is a broadcast for our purposes.
+        return BROADCAST_NAME
+    return mac or "unknown"
+
+
+def packet_shape(packet: dict):
+    """
+    Reduce a packet to (proto, src_name, dst_name, src_port, dst_port, is_syn).
+
+    Ports are None for anything that has none. Returns None for a packet with
+    no ethernet layer at all, which should not happen on this network but is
+    not worth crashing over.
+    """
+    eth_src = (packet["eth.src"] or "").lower()
+    eth_dst = (packet["eth.dst"] or "").lower()
+    if not eth_src:
+        return None
+
+    ip_src = packet["ip.src"] or packet["ipv6.src"] or ""
+    ip_dst = packet["ip.dst"] or packet["ipv6.dst"] or ""
+
+    src = endpoint_name(eth_src, ip_src)
+    dst = endpoint_name(eth_dst, ip_dst)
+
+    tcp_sport = _int_or_none(packet["tcp.srcport"])
+    udp_sport = _int_or_none(packet["udp.srcport"])
+
+    if tcp_sport is not None:
+        # A connection request: SYN set, ACK clear. tshark reports these as
+        # "1"/"0" or "True"/"False" depending on version, so test loosely.
+        syn = str(packet["tcp.flags.syn"]).strip() in ("1", "True")
+        ack = str(packet["tcp.flags.ack"]).strip() in ("1", "True")
+        return ("tcp", src, dst, tcp_sport,
+                _int_or_none(packet["tcp.dstport"]), syn and not ack)
+
+    if udp_sport is not None:
+        return "udp", src, dst, udp_sport, _int_or_none(packet["udp.dstport"]), False
+
+    if packet["arp.opcode"]:
+        return "arp", src, dst, None, None, False
+
+    proto_number = _int_or_none(packet["ip.proto"])
+    if proto_number is not None:
+        return "ip%d" % proto_number, src, dst, None, None, False
+
+    return "l2", src, dst, None, None, False
+
+
+# --------------------------------------------------------------------------
+# Packets -> flows
+# --------------------------------------------------------------------------
+
+class _Flow:
+    """One conversation being accumulated. Not exported; see build_flows."""
+
+    __slots__ = ("t", "src", "dst", "dport", "bytes_out", "bytes_in", "pkts", "last")
+
+    def __init__(self, t, src, dst, dport):
+        self.t = t
+        self.src = src          # whoever spoke first: the initiator
+        self.dst = dst
+        self.dport = dport
+        self.bytes_out = 0      # initiator -> responder
+        self.bytes_in = 0       # responder -> initiator
+        self.pkts = 0
+        self.last = t
+
+    def add(self, t, length, from_initiator):
+        if from_initiator:
+            self.bytes_out += length
+        else:
+            self.bytes_in += length
+        self.pkts += 1
+        self.last = t
+
+    def row(self):
+        return {
+            "t": self.t,
+            "src": self.src,
+            "dst": self.dst,
+            "dport": self.dport,
+            "bytes_out": self.bytes_out,
+            "bytes_in": self.bytes_in,
+            "pkts": self.pkts,
+        }
+
+
+def build_flows(packets: list[dict], idle_seconds: float = IDLE_SECONDS) -> pd.DataFrame:
+    """
+    Group packets into flows and return the table, times relative to t=0.
+
+    Kept as a plain function taking plain dicts - no files, no tshark - so it
+    can be tested with a handful of hand-written packets, the same way
+    features.build_features can.
+
+    The flow key is deliberately direction-free: a packet from the broker back
+    to esp32-01 must land in the same row as the request it answers, or every
+    conversation would be split into two half-duplex rows and bytes_in would
+    be zero everywhere.
+    """
+    if not packets:
+        return pd.DataFrame(columns=COLUMNS)
+
+    start = None
+    open_flows = {}
+    done = []
+
+    for packet in packets:
+        try:
+            when = float(packet["frame.time_epoch"])
+        except (TypeError, ValueError):
+            continue
+        if start is None:
+            start = when
+        t = when - start
+
+        shape = packet_shape(packet)
+        if shape is None:
+            continue
+        proto, src, dst, sport, dport, is_syn = shape
+        length = _int_or_none(packet["frame.len"]) or 0
+
+        # Order-independent key, so both directions hash to the same flow.
+        ends = sorted([(src, sport), (dst, dport)], key=lambda e: (e[0], e[1] or -1))
+        key = (proto, ends[0], ends[1])
+
+        flow = open_flows.get(key)
+
+        # Two reasons to start a new row rather than extend the old one: the
+        # conversation went quiet long enough to count as over, or TCP said
+        # so explicitly with a fresh SYN.
+        if flow is not None and (t - flow.last > idle_seconds or is_syn):
+            done.append(flow)
+            flow = None
+
+        if flow is None:
+            # First packet seen decides who the initiator is - which is right
+            # for TCP (the SYN sender) and the only available answer for UDP.
+            flow = _Flow(t, src, dst, dport if dport is not None else 0)
+            open_flows[key] = flow
+
+        flow.add(t, length, from_initiator=(src == flow.src))
+
+    done.extend(open_flows.values())
+
+    frame = pd.DataFrame([f.row() for f in done])
+    frame = frame.sort_values("t", kind="stable").reset_index(drop=True)
+
+    # Identical shape and dtypes to generate.py, so anything reading a
+    # captured run cannot tell it apart from a simulated one.
+    frame.insert(0, "conn_id", ["C%06d" % i for i in range(len(frame))])
+    frame["bytes_out"] = frame["bytes_out"].astype("int64")
+    frame["bytes_in"] = frame["bytes_in"].astype("int64")
+    frame["pkts"] = frame["pkts"].astype("int32")
+    frame["dport"] = frame["dport"].astype("int32")
+    return frame[COLUMNS]
+
+
+# --------------------------------------------------------------------------
+# Saving, in the shape src/runs.py expects
+# --------------------------------------------------------------------------
+
+def next_free_run_id(data_dir: Path = runs.DATA_DIR) -> str:
+    """
+    The first run_NNN not already on disk.
+
+    Overwriting is never the default. data/ holds the simulated runs the
+    reported numbers came from; quietly replacing run_003 with a capture would
+    change results/table1.csv the next time evaluation ran and leave nothing
+    to explain why.
+    """
+    used = {p.stem for p in Path(data_dir).glob("run_*.parquet")}
+    n = 0
+    while ("run_%03d" % n) in used:
+        n += 1
+    return "run_%03d" % n
+
+
+def save_run(frame: pd.DataFrame, run_id: str, pcap_path: Path,
+             baseline_seconds=None,
+             window_seconds: int = windows.WINDOW_SECONDS,
+             data_dir: Path = runs.DATA_DIR,
+             force: bool = False):
+    """
+    Write data/<run_id>.parquet and the matching .meta.json.
+
+    Both files, always. runs.load_run needs the pair, and a parquet without
+    its inventory is a table nothing in this project can open.
+    """
+    data_dir = Path(data_dir)
+    data_dir.mkdir(parents=True, exist_ok=True)
+    parquet_file = runs.data_path(run_id, data_dir)
+    meta_file = runs.meta_path(run_id, data_dir)
+
+    if not force:
+        for existing in (parquet_file, meta_file):
+            if existing.exists():
+                raise FileExistsError(
+                    "%s already exists. Captured runs share the data/ folder with\n"
+                    "  the simulated ones, so this refuses to overwrite. Pick another\n"
+                    "  --run id, or pass --force if replacing it is what you meant."
+                    % existing
+                )
+
+    capture_seconds = float(frame["t"].max()) if len(frame) else 0.0
+    if baseline_seconds is None:
+        # Half the capture, rounded down to whole windows, but never zero -
+        # with no baseline there is nothing to call normal and the detector
+        # has no reference to compare against.
+        whole_windows = int(capture_seconds // window_seconds)
+        baseline_seconds = max(1, whole_windows // 2) * window_seconds
+
+    meta = {
+        "run_id": run_id,
+        "scenario": "capture",
+        "source_pcap": str(pcap_path),
+        "devices": [{"name": n, "kind": k} for n, k in DEVICE_KINDS.items()],
+        "device_names": list(DEVICE_KINDS),
+        "window_seconds": int(window_seconds),
+        "capture_seconds": int(round(capture_seconds)),
+        "baseline_seconds": int(baseline_seconds),
+        "baseline_windows": windows.baseline_window_count(baseline_seconds, window_seconds),
+        "n_connections": int(len(frame)),
+        "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
+    }
+
+    frame.to_parquet(parquet_file, index=False)
+    meta_file.write_text(json.dumps(meta, indent=2), encoding="utf-8")
+    return parquet_file, meta_file, meta
+
+
+def capture_to_run(pcap_path, run_id=None, tshark=None,
+                   idle_seconds: float = IDLE_SECONDS,
+                   baseline_seconds=None,
+                   window_seconds: int = windows.WINDOW_SECONDS,
+                   data_dir: Path = runs.DATA_DIR,
+                   force: bool = False):
+    """The whole job: pcap in, saved run out."""
+    pcap_path = Path(pcap_path)
+    if not pcap_path.exists():
+        raise FileNotFoundError("no capture file at %s" % pcap_path)
+
+    binary = find_tshark(tshark)
+    packets = read_packets(pcap_path, binary)
+    frame = build_flows(packets, idle_seconds=idle_seconds)
+    if run_id is None:
+        run_id = next_free_run_id(data_dir)
+    parquet_file, meta_file, meta = save_run(
+        frame, run_id, pcap_path,
+        baseline_seconds=baseline_seconds, window_seconds=window_seconds,
+        data_dir=data_dir, force=force,
+    )
+    return frame, parquet_file, meta_file, meta, len(packets)
+
+
+# --------------------------------------------------------------------------
+# Command line
+# --------------------------------------------------------------------------
+
+def main(argv=None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Turn a .pcapng capture into a flow table the pipeline can read."
+    )
+    parser.add_argument("pcap", help="the capture file, e.g. pcap/data1.pcapng")
+    parser.add_argument("--run", default=None,
+                        help="run id to save as (default: the next free run_NNN)")
+    parser.add_argument("--tshark", default=None,
+                        help="path to tshark, if it is not found automatically")
+    parser.add_argument("--idle", type=float, default=IDLE_SECONDS,
+                        help="seconds of silence that end a flow (default %d)" % IDLE_SECONDS)
+    parser.add_argument("--window", type=int, default=windows.WINDOW_SECONDS,
+                        help="feature window width in seconds (default %d)" % windows.WINDOW_SECONDS)
+    parser.add_argument("--baseline", type=float, default=None,
+                        help="baseline length in seconds (default: half the capture)")
+    parser.add_argument("--rows", type=int, default=10, help="how many rows to print")
+    parser.add_argument("--force", action="store_true",
+                        help="allow overwriting an existing run")
+    args = parser.parse_args(argv)
+
+    try:
+        frame, parquet_file, meta_file, meta, n_packets = capture_to_run(
+            Path(args.pcap), run_id=args.run, tshark=args.tshark,
+            idle_seconds=args.idle, baseline_seconds=args.baseline,
+            window_seconds=args.window, force=args.force,
+        )
+    except (FileNotFoundError, FileExistsError, RuntimeError) as exc:
+        print("\n  %s\n" % exc, file=sys.stderr)
+        return 1
+
+    n_windows = -(-meta["capture_seconds"] // meta["window_seconds"])
+    print("\n  %s  ->  %s" % (args.pcap, meta["run_id"]))
+    print("  %d packets  ->  %d flows over %ds (%d windows, baseline = first %d)"
+          % (n_packets, len(frame), meta["capture_seconds"],
+             n_windows, meta["baseline_windows"]))
+    print("  devices: %s" % ", ".join(meta["device_names"]))
+    print("  wrote %s" % parquet_file)
+    print("        %s" % meta_file)
+
+    if args.rows > 0:
+        print("\n  first %d rows" % min(args.rows, len(frame)))
+        print("  " + "-" * 88)
+        print("  %-9s %9s  %-14s %-18s %6s %10s %10s %6s"
+              % ("conn_id", "t", "src", "dst", "dport", "bytes_out", "bytes_in", "pkts"))
+        for _, r in frame.head(args.rows).iterrows():
+            print("  %-9s %9.3f  %-14s %-18s %6d %10d %10d %6d"
+                  % (r["conn_id"], r["t"], r["src"], r["dst"],
+                     r["dport"], r["bytes_out"], r["bytes_in"], r["pkts"]))
+    print()
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())
