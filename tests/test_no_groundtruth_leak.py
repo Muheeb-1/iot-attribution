@@ -11,13 +11,15 @@ The rule is about READING. Written out in full:
     Nothing in src/ may READ the answer sheet, except src/evaluate.py, whose
     entire job is marking our homework.
 
-One file has to WRITE it. src/generate.py invents the incident, so it is the
-only thing in the universe that knows the answer; somebody has to write it
-down. That is not a leak - a leak is the answer flowing back INTO the
-detection pipeline. So generate.py is allowed to name the folder, and is then
-held to a stricter standard than everyone else: this file parses its source
-code and fails if it contains ANY file-reading operation at all. It may write.
-It may not read. Not from the answer folder, not from anywhere.
+Two files have to WRITE it. src/generate.py invents an incident in software;
+src/scenario.py causes one in hardware. Each is the thing that CHOOSES the
+origin, so each is the only thing in the universe that knows its own answer;
+somebody has to write it down. That is not a leak - a leak is the answer
+flowing back INTO the detection pipeline. So both are allowed to name the
+folder, and are then held to a stricter standard than everyone else: this file
+parses their source code and fails if either contains ANY file-reading
+operation at all. They may write. They may not read. Not from the answer
+folder, not from anywhere.
 
 Everyone else - features.py, detect.py, attribute.py, report.py - may not so
 much as mention the word.
@@ -36,8 +38,10 @@ SRC = Path(__file__).resolve().parents[1] / "src"
 # May read the answers. Its only job is scoring us against them.
 MAY_READ = {"evaluate.py"}
 
-# May write the answers, and is then forbidden from reading anything.
-MAY_WRITE = {"generate.py"}
+# May write the answers, and is then forbidden from reading anything. Both
+# choose the origin - generate.py in software, scenario.py against live
+# hardware - so both are the only thing that knows their own answer.
+MAY_WRITE = {"generate.py", "scenario.py"}
 
 # Spellings that all mean "the answer sheet".
 FORBIDDEN_TERMS = ["groundtruth", "ground_truth", "ground truth"]
