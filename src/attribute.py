@@ -121,6 +121,14 @@ ABSTAIN_BELOW = 0.15
 # How many devices make the shortlist that gets re-ranked.
 SHORTLIST = 3
 
+# Should a shared-indicator link also require the DETECTED onsets to agree
+# with the first-contact order?
+#
+# The prototype said yes, and that is a bug: it discards the indicator
+# evidence in precisely the runs where the detector was misled, which are the
+# runs the indicator exists to rescue. Set True to reproduce hard.py exactly.
+REQUIRE_ONSET_ORDER = False
+
 # Evidence connection ids kept per edge, for the incident brief.
 EVIDENCE_PER_EDGE = 5
 
@@ -298,6 +306,7 @@ def add_indicator_edges(
     onsets: dict,
     device_names,
     baseline_seconds: float,
+    require_onset_order: bool = REQUIRE_ONSET_ORDER,
 ) -> nx.DiGraph:
     """
     Link devices that are calling the same place they have never called before.
@@ -321,6 +330,16 @@ def add_indicator_edges(
     needs three windows to confirm an onset and so always reports it slightly
     late. Without that allowance the very first contact - the most valuable
     one - would fall outside the window and be missed.
+
+    require_onset_order reproduces the prototype, which demanded that the
+    DETECTED onsets agree with the first-contact order before drawing the
+    link. That extra test defeats the whole purpose of this function. The
+    point of a shared indicator is that it works when the detector has been
+    misled - and the case where the detector is most misled is exactly the
+    case where its onsets disagree. On run_000 the origin touched the
+    attacker's address 480 seconds before its first victim did, but the
+    victim had been flagged 27 minutes EARLIER by an innocent backup, so the
+    link was refused and the graph came out completely empty.
     """
     lab = set(device_names)
     suspects = list(onsets)
@@ -353,16 +372,41 @@ def add_indicator_edges(
 
         order = sorted(hits, key=lambda d: hits[d])
         for earlier, later in zip(order, order[1:]):
-            if onsets[earlier] <= onsets[later] and not graph.has_edge(earlier, later):
-                graph.add_edge(
-                    earlier, later,
-                    w=WEIGHT_INDICATOR,
-                    kind="indicator",
-                    detail="both contacted %s, never seen before; %s first at %.0fs"
-                           % (destination, earlier, hits[earlier]),
-                    evidence_ids=[],
-                    indicator=destination,
-                )
+            if graph.has_edge(earlier, later):
+                continue
+
+            # THE ORDERING RULE. The candidates above are sorted by when they
+            # FIRST touched the shared address, which is the evidence this
+            # link is made of. The prototype then additionally required the
+            # detected onsets to agree, and that second test throws the
+            # evidence away whenever the detector was misled - see the note
+            # on the parameter for what it cost.
+            if require_onset_order and onsets[earlier] > onsets[later]:
+                continue
+
+            # Without the onset test there is nothing forcing a single
+            # direction, because two devices can share two different
+            # addresses in opposite orders. Refuse any edge that would close
+            # a loop: if we already believe the later device leads to the
+            # earlier one, we do not also assert the reverse.
+            #
+            # Both nodes have to be present before asking - the graph handed
+            # in normally already holds every suspect, but this function is
+            # also called with an empty one, and has_path raises rather than
+            # returning False for a node it has never seen.
+            if (graph.has_node(later) and graph.has_node(earlier)
+                    and nx.has_path(graph, later, earlier)):
+                continue
+
+            graph.add_edge(
+                earlier, later,
+                w=WEIGHT_INDICATOR,
+                kind="indicator",
+                detail="both contacted %s, never seen before; %s first at %.0fs"
+                       % (destination, earlier, hits[earlier]),
+                evidence_ids=[],
+                indicator=destination,
+            )
 
     return graph
 
@@ -486,6 +530,7 @@ def attribute(
     baseline_seconds: float,
     max_gap_seconds: float = MAX_GAP_SECONDS,
     abstain_below: float = ABSTAIN_BELOW,
+    require_onset_order: bool = REQUIRE_ONSET_ORDER,
 ) -> Attribution:
     """
     Method V5, end to end.
@@ -513,7 +558,8 @@ def attribute(
     # The full evidence graph, including indicator links. Used for the
     # re-ranking, the reported path, and the diagram in the dashboard.
     full = add_indicator_edges(
-        connections, graph.copy(), onsets, device_names, baseline_seconds
+        connections, graph.copy(), onsets, device_names, baseline_seconds,
+        require_onset_order=require_onset_order,
     )
 
     if len(ranking) < 2:
@@ -577,7 +623,8 @@ def _walk(graph: nx.DiGraph, start) -> list:
     return [start] + [n for n in nx.bfs_tree(graph, start) if n != start]
 
 
-def attribute_run(run: runs.Run, detection: detect.Detection | None = None) -> Attribution:
+def attribute_run(run: runs.Run, detection: detect.Detection | None = None,
+                  **kwargs) -> Attribution:
     """Convenience: detect and attribute a loaded run in one call."""
     if detection is None:
         detection = detect.detect_run(run)
@@ -586,6 +633,7 @@ def attribute_run(run: runs.Run, detection: detect.Detection | None = None) -> A
         detection.onsets,
         run.device_names,
         baseline_seconds=run.baseline_seconds,
+        **kwargs,
     )
 
 

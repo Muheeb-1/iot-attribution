@@ -354,8 +354,13 @@ def test_v5_matches_the_prototype_ranking_and_confidence(seed):
         connections, their_graph, their_onsets, None
     )
 
+    # require_onset_order=True is the prototype's indicator rule. The project
+    # default is now the corrected rule, so this fidelity check has to ask for
+    # the old behaviour explicitly - see
+    # test_the_corrected_indicator_rule_is_meant_to_differ below.
     ours = attribute.attribute(
-        connections, ours_detection.onsets, generate.HARD_NAMES, 3 * 3600
+        connections, ours_detection.onsets, generate.HARD_NAMES, 3 * 3600,
+        require_onset_order=True,
     )
 
     assert ours.ranking == their_ranking
@@ -526,4 +531,139 @@ def test_real_runs_never_display_an_impossible_percentage():
         result = attribute.attribute_run(run, detection)
         assert 0 <= result.confidence_percent <= 100, (
             "%s would display %d%%" % (run_id, result.confidence_percent)
+        )
+
+
+# --------------------------------------------------------------------------
+# The indicator-ordering fix
+# --------------------------------------------------------------------------
+
+def test_a_shared_indicator_link_follows_first_contact_not_detected_onsets():
+    """
+    THE BUG, in four devices.
+
+    A is patient zero and touches "evil-host" first. B touches it later. But
+    the detector was misled - B ran a huge innocent backup and was flagged
+    LONG BEFORE A. The prototype demanded that the detected onsets agree with
+    the first-contact order before drawing the link, so it threw away the one
+    piece of evidence that still pointed the right way.
+
+    The indicator exists precisely to survive a detector that has been
+    misled, so deferring to that detector defeats it.
+    """
+    records = []
+    for device in ("A", "B"):
+        records += [(float(i * 20), device, "cloud", 1000) for i in range(30)]
+
+    # A is compromised at 900s and calls evil-host first.
+    records += [(900.0 + i * 30, "A", "evil-host", 150) for i in range(10)]
+    # B is compromised later and calls the same address.
+    records += [(1400.0 + i * 30, "B", "evil-host", 150) for i in range(10)]
+
+    connections = connections_from(records)
+
+    # ...but B was FLAGGED first, by an innocent burst at 700s.
+    onsets = {"A": 900.0, "B": 700.0}
+
+    prototype = attribute.add_indicator_edges(
+        connections, nx.DiGraph(), onsets, LAB, BASELINE, require_onset_order=True
+    )
+    fixed = attribute.add_indicator_edges(
+        connections, nx.DiGraph(), onsets, LAB, BASELINE, require_onset_order=False
+    )
+
+    assert prototype.number_of_edges() == 0, "the prototype used to drop this link"
+    assert fixed.has_edge("A", "B"), "the corrected rule must keep it"
+    assert fixed["A"]["B"]["kind"] == "indicator"
+    assert not fixed.has_edge("B", "A"), "the arrow must follow first contact"
+
+
+def test_the_corrected_rule_is_the_default():
+    assert attribute.REQUIRE_ONSET_ORDER is False
+
+
+def test_the_prototype_rule_is_still_reachable():
+    """
+    The published 53%/90% figures were measured with the old rule, so it has
+    to stay available or that claim becomes unverifiable.
+    """
+    import inspect
+    assert "require_onset_order" in inspect.signature(attribute.attribute).parameters
+    assert "require_onset_order" in inspect.signature(
+        attribute.add_indicator_edges).parameters
+
+
+def test_the_corrected_indicator_rule_is_meant_to_differ():
+    """
+    The two rules must actually produce different graphs on real data,
+    otherwise the fix is a no-op and the measured improvement is noise.
+    """
+    differences = 0
+    for seed in range(5000, 5010):
+        connections, _ = generate.make_run(seed)
+        table = features.build_features(connections, generate.HARD_NAMES, 3 * 3600)
+        detection = detect.detect(table, baseline_windows=180)
+
+        old = attribute.attribute(connections, detection.onsets, generate.HARD_NAMES,
+                                  3 * 3600, require_onset_order=True)
+        new = attribute.attribute(connections, detection.onsets, generate.HARD_NAMES,
+                                  3 * 3600, require_onset_order=False)
+        if old.graph.number_of_edges() != new.graph.number_of_edges():
+            differences += 1
+
+    assert differences > 0, "the corrected rule changed nothing on ten real runs"
+
+
+def test_the_corrected_rule_only_ever_adds_links():
+    """
+    Removing a test can only permit more edges, never fewer. If the fixed
+    graph were ever smaller, something other than the ordering rule changed.
+    """
+    for seed in range(5000, 5006):
+        connections, _ = generate.make_run(seed)
+        table = features.build_features(connections, generate.HARD_NAMES, 3 * 3600)
+        detection = detect.detect(table, baseline_windows=180)
+
+        old = attribute.attribute(connections, detection.onsets, generate.HARD_NAMES,
+                                  3 * 3600, require_onset_order=True)
+        new = attribute.attribute(connections, detection.onsets, generate.HARD_NAMES,
+                                  3 * 3600, require_onset_order=False)
+
+        assert set(old.graph.edges()) <= set(new.graph.edges())
+
+
+def test_indicator_links_never_close_a_loop():
+    """
+    The discarded onset test was, by accident, the only thing keeping the
+    graph acyclic: two devices can share two different addresses in opposite
+    orders. A cycle would make each device both an ancestor and a descendant
+    of the other, wrecking the stage-2 re-ranking, so the fix refuses any
+    edge that would close one.
+    """
+    records = []
+    for device in ("A", "B"):
+        records += [(float(i * 20), device, "cloud", 1000) for i in range(30)]
+
+    # A touches host-x first...
+    records += [(900.0, "A", "host-x", 150), (1000.0, "B", "host-x", 150)]
+    # ...but B touches host-y first, which would point the other way.
+    records += [(910.0, "B", "host-y", 150), (1100.0, "A", "host-y", 150)]
+
+    connections = connections_from(records)
+    graph = attribute.add_indicator_edges(
+        connections, nx.DiGraph(), {"A": 900.0, "B": 905.0}, LAB, BASELINE,
+        require_onset_order=False,
+    )
+
+    assert not (graph.has_edge("A", "B") and graph.has_edge("B", "A"))
+    assert nx.is_directed_acyclic_graph(graph)
+
+
+def test_real_runs_produce_an_acyclic_evidence_graph():
+    for run_id in runs.list_runs()[:8]:
+        run = runs.load_run(run_id)
+        detection = detect.detect_run(run)
+        result = attribute.attribute_run(run, detection)
+        assert nx.is_directed_acyclic_graph(result.graph), (
+            "%s produced a cycle in the evidence graph" % run_id
         )

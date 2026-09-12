@@ -48,3 +48,14 @@ results/*.json
 # should be readable in the repository without re-running anything.
 !results/table1.csv
 !results/per_run.csv
+
+# ---- Live lab captures ----
+# Raw packet captures are large binaries (baseline.pcapng alone is ~5 MB) and
+# are re-creatable by re-running the lab, so they stay out of git. The
+# firmware that produced them IS tracked - it is source, and it is small.
+pcap/
+
+# ---- Secrets ----
+# The Gemini API key lives here. Never commit it.
+API_KEY.env
+*.env

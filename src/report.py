@@ -68,7 +68,29 @@ from pydantic import BaseModel, Field
 
 from src import attribute, detect, runs
 
-MODEL = "qwen3:4b"
+# THE LOCAL MODEL, AND WHY IT IS NOT THE OBVIOUS ONE
+# --------------------------------------------------
+# qwen3:4b was the original choice and it was the wrong one twice over: it is
+# a reasoning model, so every brief paid for a long hidden thinking passage
+# that was then discarded, and its 256K context window did not fit in memory
+# and spilled to disk. Twenty briefs took three hours.
+#
+# gemma3:4b fixes the first half - it is not a reasoning model - but on this
+# machine it does not fit. It loads at 3.5 GB against roughly 2.9 GB of free
+# VRAM (4 GB card, ~1.2 GB already in use), so Ollama pushes 54% of it onto
+# the CPU. Measured: 219 seconds for a single brief, and the JSON came back
+# truncated mid-string because the reply outgrew what was left of the window.
+#
+# llama3.2:3b loads at 80% on the GPU and produced the same brief in 37
+# seconds. Both are non-reasoning models; this one actually fits.
+LOCAL_MODEL = "llama3.2:3b"
+MODEL = LOCAL_MODEL        # what --provider local uses, unless --model says otherwise
+
+# The context window. The evidence prompt measures ~2,100 tokens and a brief
+# runs to ~250, so 4096 holds both with room for the retry's extra text. This
+# is the number that stops the 256K spill-to-disk.
+NUM_CTX = 4096
+
 TEMPERATURE = 0.1          # we want faithful, not creative
 MAX_ATTEMPTS = 2           # generate, then one regeneration, then template
 EVIDENCE_CONNECTIONS = 40  # how many raw connections to show the model
@@ -581,7 +603,10 @@ def generate_brief(evidence: dict, facts: AllowedFacts, run: runs.Run,
                 # THIS is what forces the structure: the pydantic model's own
                 # JSON schema is handed to Ollama, which constrains generation.
                 format=IncidentBrief.model_json_schema(),
-                options={"temperature": TEMPERATURE},
+                options={"temperature": TEMPERATURE, "num_ctx": NUM_CTX},
+                # Neither local model reasons, so this changes nothing for
+                # them - it is here so that pointing --model at a reasoning
+                # model cannot quietly reintroduce the three-hour problem.
                 think=False,
             )
             raw = response["message"]["content"]

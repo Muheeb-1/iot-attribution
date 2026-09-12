@@ -81,6 +81,15 @@ BASELINE_NAMES = [
     "B4 earliest onset",
 ]
 
+# The two indicator-ordering rules, scored side by side so the effect of the
+# fix is measured rather than asserted. See attribute.REQUIRE_ONSET_ORDER.
+V5_FIXED = "V5 attribution"
+V5_PROTOTYPE = "V5 (prototype indicator rule)"
+V5_METHODS = [V5_PROTOTYPE, V5_FIXED]
+
+# Which per-run field records the abstention for each method.
+ABSTAIN_FIELD = {V5_FIXED: "abstained", V5_PROTOTYPE: "abstained_prototype"}
+
 # What the prototype measured, for comparison. If we land far from these,
 # one of the two is broken and we need to know which.
 EXPECTED_HARD_TOP1 = {
@@ -88,9 +97,9 @@ EXPECTED_HARD_TOP1 = {
     "B2 anomaly score": 10,
     "B3 connection count": 3,
     "B4 earliest onset": 17,
-    "V5 attribution": 53,
+    V5_PROTOTYPE: 53,
 }
-EXPECTED_HARD_TOP3 = {"V5 attribution": 90}
+EXPECTED_HARD_TOP3 = {V5_PROTOTYPE: 90}
 
 
 def load_answer(run_id: str, groundtruth_dir: Path = GROUNDTRUTH_DIR) -> dict:
@@ -137,9 +146,15 @@ def evaluate_one(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR) ->
         weighted=False, window_seconds=run.window_seconds,
     )
 
-    result = attribute.attribute(
+    # Both indicator-ordering rules, on identical detections, so any
+    # difference between them is the rule and nothing else.
+    fixed = attribute.attribute(
         run.connections, weighted.onsets, run.device_names,
-        baseline_seconds=run.baseline_seconds,
+        baseline_seconds=run.baseline_seconds, require_onset_order=False,
+    )
+    prototype = attribute.attribute(
+        run.connections, weighted.onsets, run.device_names,
+        baseline_seconds=run.baseline_seconds, require_onset_order=True,
     )
 
     # ---- the answer sheet is opened here, and nowhere else ----
@@ -154,9 +169,17 @@ def evaluate_one(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR) ->
         "scenario": run.scenario,
         "origin": origin,
         "via_broker": bool(answer.get("via_broker", False)),
-        "V5 attribution": rank_of(result.ranking, origin),
-        "confidence": result.confidence,
-        "abstained": result.abstained,
+        V5_FIXED: rank_of(fixed.ranking, origin),
+        V5_PROTOTYPE: rank_of(prototype.ranking, origin),
+        "confidence": fixed.confidence,
+        "abstained": fixed.abstained,
+        "abstained_prototype": prototype.abstained,
+        "indicator_edges": sum(
+            1 for _, _, d in fixed.graph.edges(data=True) if d.get("kind") == "indicator"
+        ),
+        "indicator_edges_prototype": sum(
+            1 for _, _, d in prototype.graph.edges(data=True) if d.get("kind") == "indicator"
+        ),
         "origin_flagged": origin in weighted.onsets,
         "origin_flagged_plain": origin in plain.onsets,
         "n_flagged": len(weighted.onsets),
@@ -175,9 +198,8 @@ def summarise(records: list, methods: list) -> pd.DataFrame:
     for method in methods:
         ranks = np.array([r[method] for r in records])
         found = ranks[ranks < NOT_RANKED]
-        abstentions = (
-            sum(1 for r in records if r["abstained"]) if method == "V5 attribution" else None
-        )
+        field = ABSTAIN_FIELD.get(method)
+        abstentions = sum(1 for r in records if r[field]) if field else None
         rows.append({
             "method": method,
             "runs": n,
@@ -219,7 +241,7 @@ def evaluate_scenario(prefix: str, limit: int | None = None,
     if not verbose:
         print(" " * 40, end="\r")
 
-    methods = BASELINE_NAMES + ["V5 attribution"]
+    methods = BASELINE_NAMES + V5_METHODS
     summary = summarise(records, methods)
     fair = summarise(records, ["fair " + b for b in BASELINE_NAMES])
     return records, summary, fair
@@ -299,6 +321,36 @@ def main(argv=None) -> int:
             summary, expected1, expected3,
         )
         print("\n  detector never flagged the true origin: %d of %d runs" % (missed, n))
+
+        before = next(r for _, r in summary.iterrows() if r["method"] == V5_PROTOTYPE)
+        after = next(r for _, r in summary.iterrows() if r["method"] == V5_FIXED)
+        moved = [r for r in records if r[V5_FIXED] != r[V5_PROTOTYPE]]
+        better = [r for r in moved if r[V5_FIXED] < r[V5_PROTOTYPE]]
+        worse = [r for r in moved if r[V5_FIXED] > r[V5_PROTOTYPE]]
+        extra_edges = sum(r["indicator_edges"] - r["indicator_edges_prototype"]
+                          for r in records)
+
+        print("\n  EFFECT OF THE INDICATOR-ORDERING FIX")
+        print("  %-12s %8s %8s %11s %12s"
+              % ("rule", "top-1", "top-3", "mean rank", "abstained"))
+        print("  " + "-" * 56)
+        for rule, row in (("prototype", before), ("fixed", after)):
+            print("  %-12s %7.0f%% %7.0f%% %11.2f %11s%%"
+                  % (rule, row["top1_pct"], row["top3_pct"], row["mean_rank"],
+                     row["abstention_pct"]))
+        print("  %-12s %+7.0f  %+7.0f  %+11.2f"
+              % ("difference", after["top1_pct"] - before["top1_pct"],
+                 after["top3_pct"] - before["top3_pct"],
+                 after["mean_rank"] - before["mean_rank"]))
+        print("\n  indicator links recovered: %d across %d runs" % (extra_edges, n))
+        print("  runs where the true origin moved: %d better, %d worse"
+              % (len(better), len(worse)))
+        for record in better[:6]:
+            print("      %-10s rank %d -> %d"
+                  % (record["run_id"], record[V5_PROTOTYPE], record[V5_FIXED]))
+        for record in worse[:6]:
+            print("      %-10s rank %d -> %d   WORSE"
+                  % (record["run_id"], record[V5_PROTOTYPE], record[V5_FIXED]))
 
         print_table(
             "FAIRNESS CHECK - the same baselines given the better (weighted) detector",

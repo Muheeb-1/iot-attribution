@@ -29,9 +29,10 @@ The device whose story explains the most, that nothing else points at, and
 that started earliest, is named as the origin.
 
 That method is called **V5**, and on the same hard benchmark it is right
-**53%** of the time first try, and has the true origin in its **top 3 90%** of
-the time. When it is not confident it says so and hands over a shortlist of
-three instead of guessing.
+**56.7%** of the time first try, and has the true origin in its **top 3 90%**
+of the time. On the easy benchmark it is right **100%** of the time. When it is
+not confident it says so and hands over a shortlist of three instead of
+guessing.
 
 ## How it is put together
 
@@ -85,11 +86,22 @@ The real project rebuilds **V5** properly, in separate testable files, and must
 reproduce those numbers. If it does not, something is broken and we want to
 know.
 
+Rebuilding it that way exposed a bug in the prototype's shared-indicator rule
+(see *Two indicator rules* below). The prototype's rule is kept and still
+reproduces its original figures exactly; the corrected rule is what the project
+now uses by default.
+
 ## Results
 
 Measured over 30 runs of each benchmark (`python -m src.evaluate --runs 30`,
-saved to `results/table1.csv`). Every hard-benchmark figure reproduces the
+saved to `results/table1.csv`). Every prototype-rule figure reproduces the
 prototype exactly.
+
+**Both indicator rules are scored side by side, on identical detections**, so
+the effect of the rule change is *measured, not asserted*. The two V5 rows in
+each table below differ in one thing only: whether a shared-indicator link is
+required to agree with the detected onsets. Everything else — the same runs,
+the same detector output, the same ranking code — is held fixed.
 
 ### Hard benchmark - 12 devices, decoys, stealthy attacker, 40% relayed hops
 
@@ -99,7 +111,8 @@ prototype exactly.
 | B2 blame the strangest-looking | 10% | 47% | 4.10 | - |
 | B3 blame the busiest | 3% | 10% | 5.63 | - |
 | B4 blame whoever went odd first | 17% | 53% | 3.27 | - |
-| **V5 attribution** | **53%** | **90%** | **2.00** | 17% |
+| V5, prototype indicator rule | 53.3% | 90% | 2.00 | 17% |
+| **V5 attribution** (corrected rule) | **56.7%** | **90%** | **1.90** | 17% |
 
 ### Easy benchmark - 7 devices, no decoys, no relayed hops
 
@@ -109,10 +122,36 @@ prototype exactly.
 | B2 blame the strangest-looking | 10% | 43% | 3.57 | - |
 | B3 blame the busiest | 13% | 83% | 3.13 | - |
 | B4 blame whoever went odd first | 50% | 100% | 1.57 | - |
-| **V5 attribution** | **90%** | **100%** | **1.10** | 7% |
+| V5, prototype indicator rule | 90% | 100% | 1.10 | 7% |
+| **V5 attribution** (corrected rule) | **100%** | **100%** | **1.00** | 0% |
 
 V5 is right about three times as often as the best standard approach on the
 hard benchmark, and when it is unsure it says so instead of guessing.
+
+### Two indicator rules, scored side by side
+
+V5 draws a link between two devices that both contacted the same address they
+had never contacted before. The prototype additionally demanded that the
+*detected onsets* agree with the order of first contact before drawing that
+link — and that extra test throws the evidence away in exactly the runs the
+indicator exists to rescue, the ones where the detector was misled. On
+`run_000` the origin touched the attacker's address 480 seconds before its
+first victim did, but the victim had been flagged 27 minutes earlier by an
+innocent backup, so the link was refused and the graph came out empty.
+
+Dropping that test is the only change. Because it can only ever *permit* more
+links, the corrected graph is always a superset of the prototype's — enforced
+by a test. A second test enforces that the two rules really do produce
+different graphs on real runs, so the improvement cannot be noise.
+
+| | hard top-1 | hard top-3 | easy top-1 | easy abstained |
+|---|---:|---:|---:|---:|
+| prototype rule | 53.3% | 90% | 90% | 7% |
+| corrected rule | 56.7% | 90% | 100% | 0% |
+| difference | **+3.4** | +0 | **+10** | **-7** |
+
+`python -m src.evaluate` prints this comparison, the count of indicator links
+recovered, and every run whose true origin moved — in either direction.
 
 ## The incident brief, and why it can be trusted
 
