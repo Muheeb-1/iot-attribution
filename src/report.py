@@ -61,9 +61,11 @@ import json
 import re
 import sys
 from dataclasses import dataclass, field
+from pathlib import Path
 from typing import Literal
 
 import pandas as pd
+import requests
 from pydantic import BaseModel, Field
 
 from src import attribute, detect, runs
@@ -84,7 +86,43 @@ from src import attribute, detect, runs
 # llama3.2:3b loads at 80% on the GPU and produced the same brief in 37
 # seconds. Both are non-reasoning models; this one actually fits.
 LOCAL_MODEL = "llama3.2:3b"
+
+# THE CLOUD MODEL, AND WHY THE COMPARISON IS WORTH RUNNING
+# --------------------------------------------------------
+# The whole argument of this file is that a brief is only trustworthy because
+# it is CHECKED, not because of which model wrote it. That claim is easy to
+# make and easy to believe wrongly, because the obvious objection is "your
+# validator only has to work so hard because the local model is small".
+#
+# So the same evidence goes to a frontier model behind the same validator.
+# gemini-3.6-flash is the fair comparison: it is the cloud tier that costs
+# about what this project could actually afford to run per incident, and like
+# llama3.2:3b it is held to the lowest reasoning setting it offers, so the two
+# differ in capability rather than in how much hidden work they are allowed.
+#
+# gemini-2.5-flash was the first choice and is still listed by the models
+# endpoint, but it answers a real request with HTTP 404 "no longer available
+# to new users" - listed and callable are different questions on this API.
+#
+# The 3.x models replace thinkingBudget with thinkingLevel and reject the old
+# key outright (HTTP 400), and unlike Ollama's think=False there is no setting
+# that disables reasoning entirely - "low" is the floor. Thought parts are
+# filtered out of the reply below rather than being allowed to reach the JSON
+# parser, which is the same instinct as think=False: this layer transcribes,
+# it does not deliberate.
+CLOUD_MODEL = "gemini-3.6-flash"
+
 MODEL = LOCAL_MODEL        # what --provider local uses, unless --model says otherwise
+DEFAULT_MODEL = {"local": LOCAL_MODEL, "cloud": CLOUD_MODEL}
+
+# The key lives in a file that .gitignore keeps out of the repository. It is
+# read at call time rather than import time so that every offline path - the
+# tests, the dashboard's replay mode, --offline - keeps working on a machine
+# that has no key at all.
+API_KEY_FILE = "API_KEY.env"
+GEMINI_ENDPOINT = ("https://generativelanguage.googleapis.com/v1beta/"
+                   "models/%s:generateContent")
+CLOUD_TIMEOUT = 90
 
 # The context window. The evidence prompt measures ~2,100 tokens and a brief
 # runs to ~250, so 4096 holds both with room for the retry's extra text. This
@@ -568,48 +606,172 @@ def _build_user_prompt(evidence: dict, previous_problems=None) -> str:
     return "\n".join(parts)
 
 
+# --------------------------------------------------------------------------
+# The two transports
+#
+# Both take the same system prompt, the same user prompt and the same schema,
+# and both return the raw JSON text of one brief. Everything that makes a
+# brief trustworthy happens after this point and is identical for both, which
+# is the entire reason the comparison means anything.
+# --------------------------------------------------------------------------
+
+def _chat_ollama(model: str, system: str, user: str) -> str:
+    import ollama
+
+    response = ollama.chat(
+        model=model,
+        messages=[{"role": "system", "content": system},
+                  {"role": "user", "content": user}],
+        # THIS is what forces the structure: the pydantic model's own
+        # JSON schema is handed to Ollama, which constrains generation.
+        format=IncidentBrief.model_json_schema(),
+        options={"temperature": TEMPERATURE, "num_ctx": NUM_CTX},
+        # Neither local model reasons, so this changes nothing for them - it
+        # is here so that pointing --model at a reasoning model cannot
+        # quietly reintroduce the three-hour problem.
+        think=False,
+    )
+    return response["message"]["content"]
+
+
+def _gemini_key() -> str:
+    """Read the key out of the ignored env file. Never logged, never printed."""
+    path = Path(API_KEY_FILE)
+    if not path.exists():
+        raise RuntimeError("%s not found - the cloud provider needs a "
+                           "GEMINI_API_KEY" % API_KEY_FILE)
+    match = re.search(r"^\s*GEMINI_API_KEY\s*=\s*(\S+)\s*$",
+                      path.read_text(encoding="utf-8"), re.M)
+    if not match:
+        raise RuntimeError("no GEMINI_API_KEY line in %s" % API_KEY_FILE)
+    return match.group(1)
+
+
+def _gemini_schema(schema: dict, defs: dict | None = None) -> dict:
+    """
+    Rewrite a pydantic JSON schema into the subset Gemini accepts.
+
+    Two incompatibilities, both fatal rather than cosmetic. Pydantic hoists
+    every nested model into `$defs` and refers to it with `$ref`, which Gemini
+    rejects outright, so the definitions are inlined here. And keys it does
+    not know - `title`, `additionalProperties`, `default` - are refused rather
+    than ignored, so only the understood ones are copied across.
+
+    `propertyOrdering` is set from the declared field order. Without it the
+    fields come back in an arbitrary order, which does not break parsing but
+    does make two runs of the same brief pointlessly hard to diff.
+    """
+    if defs is None:
+        defs = schema.get("$defs", {})
+
+    if "$ref" in schema:
+        name = schema["$ref"].rsplit("/", 1)[-1]
+        return _gemini_schema(defs[name], defs)
+
+    keep = ("type", "description", "enum", "nullable", "format")
+    out = {k: schema[k] for k in keep if k in schema}
+
+    if "properties" in schema:
+        out["properties"] = {
+            key: _gemini_schema(value, defs)
+            for key, value in schema["properties"].items()
+        }
+        out["propertyOrdering"] = list(schema["properties"])
+    if "required" in schema:
+        out["required"] = list(schema["required"])
+    if "items" in schema:
+        out["items"] = _gemini_schema(schema["items"], defs)
+    return out
+
+
+def _chat_gemini(model: str, system: str, user: str) -> str:
+    response = requests.post(
+        GEMINI_ENDPOINT % model,
+        headers={"x-goog-api-key": _gemini_key(),
+                 "Content-Type": "application/json"},
+        json={
+            "systemInstruction": {"parts": [{"text": system}]},
+            "contents": [{"role": "user", "parts": [{"text": user}]}],
+            "generationConfig": {
+                "temperature": TEMPERATURE,
+                # The cloud equivalent of Ollama's format=: generation is
+                # constrained to the schema rather than merely asked for it.
+                "responseMimeType": "application/json",
+                "responseSchema": _gemini_schema(
+                    IncidentBrief.model_json_schema()),
+                "thinkingConfig": {"thinkingLevel": "low"},
+            },
+        },
+        timeout=CLOUD_TIMEOUT,
+    )
+    if response.status_code != 200:
+        # The body carries the real reason (bad key, quota, bad schema) and
+        # the status alone does not. No key is echoed back in it.
+        raise RuntimeError("gemini HTTP %d: %s"
+                           % (response.status_code, response.text[:300]))
+
+    payload = response.json()
+    candidates = payload.get("candidates") or []
+    if not candidates:
+        raise RuntimeError("gemini returned no candidates: %s"
+                           % json.dumps(payload)[:300])
+    parts = candidates[0].get("content", {}).get("parts") or []
+    # Reasoning cannot be switched off on these models, only turned down, so
+    # a reply can carry thought parts alongside the answer. They are prose,
+    # not JSON, and concatenating them would corrupt the parse.
+    text = "".join(part.get("text", "") for part in parts
+                   if not part.get("thought"))
+    if not text.strip():
+        # An empty part with a non-STOP finishReason is how a length or
+        # safety stop arrives; surfacing it beats a confusing JSON error.
+        raise RuntimeError("gemini returned empty text (finishReason=%s)"
+                           % candidates[0].get("finishReason"))
+    return text
+
+
+TRANSPORTS = {"local": _chat_ollama, "cloud": _chat_gemini}
+
+
 def generate_brief(evidence: dict, facts: AllowedFacts, run: runs.Run,
                    result: attribute.Attribution,
-                   model: str = MODEL, max_attempts: int = MAX_ATTEMPTS,
-                   offline: bool = False) -> BriefResult:
+                   model: str | None = None, max_attempts: int = MAX_ATTEMPTS,
+                   offline: bool = False,
+                   provider: str = "local") -> BriefResult:
     """
     Ask the model for a brief, check it, and retry once if it invents things.
     Falls back to the template if it fails twice, or if the model is not
     reachable at all.
+
+    `provider` picks the transport - "local" for Ollama, "cloud" for Gemini.
+    Nothing below the transport changes: the same validator judges both, and
+    a cloud brief that invents a device is rejected exactly as a local one is.
     """
     if offline:
         return BriefResult(brief=template_brief(evidence, run, result),
                            source="LLM_FALLBACK", attempts=0,
                            rejections=["offline mode - template used by request"])
 
+    if provider not in TRANSPORTS:
+        raise ValueError("unknown provider %r - expected one of %s"
+                         % (provider, ", ".join(sorted(TRANSPORTS))))
+    chat = TRANSPORTS[provider]
+    model = model or DEFAULT_MODEL[provider]
+
     try:
-        import ollama
+        import ollama          # noqa: F401  - checked early, used by _chat_ollama
     except ImportError:
-        return BriefResult(brief=template_brief(evidence, run, result),
-                           source="LLM_FALLBACK", attempts=0,
-                           error="the ollama package is not installed")
+        if provider == "local":
+            return BriefResult(brief=template_brief(evidence, run, result),
+                               source="LLM_FALLBACK", attempts=0,
+                               error="the ollama package is not installed")
 
     rejections = []
     problems = None
 
     for attempt in range(1, max_attempts + 1):
         try:
-            response = ollama.chat(
-                model=model,
-                messages=[
-                    {"role": "system", "content": SYSTEM_PROMPT},
-                    {"role": "user", "content": _build_user_prompt(evidence, problems)},
-                ],
-                # THIS is what forces the structure: the pydantic model's own
-                # JSON schema is handed to Ollama, which constrains generation.
-                format=IncidentBrief.model_json_schema(),
-                options={"temperature": TEMPERATURE, "num_ctx": NUM_CTX},
-                # Neither local model reasons, so this changes nothing for
-                # them - it is here so that pointing --model at a reasoning
-                # model cannot quietly reintroduce the three-hour problem.
-                think=False,
-            )
-            raw = response["message"]["content"]
+            raw = chat(model, SYSTEM_PROMPT,
+                       _build_user_prompt(evidence, problems))
             brief = IncidentBrief.model_validate_json(raw)
         except Exception as exc:      # unreachable, timeout, malformed JSON
             rejections.append("attempt %d failed: %s" % (attempt, exc))
@@ -730,7 +892,8 @@ def template_brief(evidence: dict, run: runs.Run,
 # Putting it together
 # --------------------------------------------------------------------------
 
-def brief_for_run(run_id: str, offline: bool = False, model: str = MODEL) -> tuple:
+def brief_for_run(run_id: str, offline: bool = False,
+                  model: str | None = None, provider: str = "local") -> tuple:
     """Load a run, analyse it, and produce a validated brief."""
     run = runs.load_run(run_id)
     detection = detect.detect_run(run)
@@ -739,7 +902,7 @@ def brief_for_run(run_id: str, offline: bool = False, model: str = MODEL) -> tup
     evidence = build_evidence(run, detection, result)
     facts = allowed_facts_from(evidence, run)
     outcome = generate_brief(evidence, facts, run, result,
-                             model=model, offline=offline)
+                             model=model, offline=offline, provider=provider)
     return outcome, evidence, result
 
 
@@ -779,7 +942,12 @@ def main(argv=None) -> int:
     parser.add_argument("run_id", nargs="?", help="e.g. run_000")
     parser.add_argument("--offline", action="store_true",
                         help="skip the model and use the plain template")
-    parser.add_argument("--model", default=MODEL)
+    parser.add_argument("--provider", choices=sorted(TRANSPORTS), default="local",
+                        help="local runs Ollama on this machine; cloud calls "
+                             "Gemini and needs a key in " + API_KEY_FILE)
+    parser.add_argument("--model", default=None,
+                        help="override the provider's default model (%s)"
+                             % ", ".join("%s=%s" % kv for kv in DEFAULT_MODEL.items()))
     parser.add_argument("--batch", type=int, default=None,
                         help="generate this many briefs and report the fallback rate")
     parser.add_argument("--show-evidence", action="store_true")
@@ -789,7 +957,8 @@ def main(argv=None) -> int:
         stats = BatchStats()
         run_ids = runs.list_runs(prefix="run")[:args.batch]
         for i, run_id in enumerate(run_ids, 1):
-            outcome, _, _ = brief_for_run(run_id, offline=args.offline, model=args.model)
+            outcome, _, _ = brief_for_run(run_id, offline=args.offline,
+                                          model=args.model, provider=args.provider)
             stats.total += 1
             if outcome.is_fallback:
                 stats.fallback += 1
@@ -815,7 +984,7 @@ def main(argv=None) -> int:
         parser.error("give a run_id, or use --batch N")
 
     outcome, evidence, _ = brief_for_run(args.run_id, offline=args.offline,
-                                         model=args.model)
+                                         model=args.model, provider=args.provider)
     if args.show_evidence:
         print(json.dumps(evidence, indent=2))
 
