@@ -95,34 +95,157 @@ ROOT = Path(__file__).resolve().parents[1]
 # not the answer sheet: it says which machines are ours, not which one is
 # compromised.
 #
-# Each of these was confirmed from the capture itself rather than assumed:
-# the three sensors announce their own names as MQTT client IDs (and esp32-01
-# also as a DHCP hostname, esp32-C3C010), and the broker is the endpoint every
-# one of them opens port 1883 to.
+# Every entry below was confirmed FROM THE CAPTURES, not assumed. The evidence
+# is recorded next to each one so a wrong name is a checkable claim rather than
+# a guess that quietly poisons every result downstream:
+#
+#   esp32-01  DHCP hostname "esp32-C3C010" in data1.pcapng; Espressif OUI.
+#             Absent from baseline.pcapng - it was not powered on for that
+#             recording. Still a real board, so it stays in the inventory.
+#   esp32-02  MQTT topic "iot/esp32-02" on port 1883; Espressif OUI.
+#   esp32-03  MQTT topic "iot/esp32-03" on port 1883; Espressif OUI.
+#   broker    the endpoint every sensor opens 1883 to; ASUSTek OUI (it is the
+#             laptop). Seen on .0.200 and on .137.1, its ICS hotspot address.
+#   router    DHCP hostname "ArcherC6", TP-Link OUI, .0.254. Present in both
+#             captures and the loudest talker in each.
 # --------------------------------------------------------------------------
 MAC_TO_NAME = {
+    # ---- the lab's own devices: these are the suspects (see DEVICE_KINDS) --
     "1c:c3:ab:c3:c0:10": "esp32-01",   # 192.168.0.129
     "30:76:f5:e4:eb:60": "esp32-02",   # 192.168.0.160
     "30:76:f5:e5:e5:ac": "esp32-03",   # 192.168.0.203
-    "cc:28:aa:75:4e:bd": "broker",     # 192.168.0.200
+    # "xx:xx:xx:xx:xx:xx": "plug",     # <- smart plug; decide which group first
+
+    # ---- infrastructure: named, but never suspects (see INFRASTRUCTURE) ----
+    "cc:28:aa:75:4e:bd": "broker",     # 192.168.0.200 / 192.168.137.1
+    "c0:3a:55:43:f3:18": "router",     # 192.168.0.254, TP-Link Archer C6
+
+    # ---- background: they show up in captures, but are never attackable ----
+    "48:83:b4:19:b8:13": "phone",      # 192.168.0.177
+    "2c:6d:c1:3e:7a:9c": "laptop-i3",  # 192.168.0.218
 }
 
-# A second way to recognise the broker. If it is ever reached through the
-# router - or swapped for another machine on the same address - the MAC will
-# not match but the address still identifies the service.
+# A second way to recognise the fixed infrastructure. If one of these is ever
+# reached through the router - or swapped for another machine on the same
+# address - the MAC will not match but the address still identifies it.
+#
+# The router NEEDS its entry here, not just the MAC one. It appears both as a
+# sender (its own MAC) and as a bare IP in flows that merely pass through it,
+# and without this line one physical box shows up in the flow table as two
+# separate identities: "c0:3a:55:43:f3:18" and "192.168.0.254".
 IP_TO_NAME = {
     "192.168.0.200": "broker",
+    "192.168.137.1": "broker",
+    "192.168.0.254": "router",
+    "192.168.0.177": "phone",
+    "192.168.0.218": "laptop-i3",
 }
 
-# The suspects. The broker is infrastructure, not a suspect: it talks to
-# everything by design, so including it would mean attributing the incident
-# to the message queue. generate.py leaves it out of device_names for the
-# same reason, and features.py only ever builds rows for names on this list.
+# Named, but NOT suspects. The broker talks to everything by design, so
+# attributing an incident to it would be attributing it to the message queue;
+# the router carries every packet on the segment for the same structural
+# reason. Naming them is still worth doing - it collapses each to one readable
+# identity instead of a scatter of raw MACs and IPs - but they are excluded
+# from the inventory, which is what makes them un-blameable.
+#
+# Exclusion is not a special case in the code. features.py builds rows only
+# for names in device_names, and device_names is DEVICE_KINDS - so anything
+# absent from DEVICE_KINDS can never be scored, ranked, or accused. This set
+# exists to make that intent explicit and checkable rather than an accident of
+# omission; the assertion below is what actually holds the line.
+INFRASTRUCTURE = {"broker", "router"}
+
+# Named, but not ours to blame: the household devices that share the air with
+# the lab but are not part of the experiment - a phone, say. They appear in
+# every capture, they are noisy, and they are never scored, ranked, attacked,
+# or accused. They are the weather the experiment happens in.
+#
+# They are kept out of DEVICE_KINDS for exactly the reason the router is: a
+# device that cannot be scored cannot be accused. Naming them is still worth
+# doing, because an unnamed device fragments into a scatter of raw MACs and
+# DHCP addresses, and "esp32-02 contacted 4 new outside addresses" reads very
+# differently when three of them turn out to have been the same phone.
+#
+# NOTE - laptop-i3 used to live here. It has been promoted to a SCORED
+# CANDIDATE (it is in DEVICE_KINDS below): a permanently-innocent, naturally
+# loud device that the detector scores and attribution may rank or even blame,
+# but that scenario.py must never actually attack. "Scored" and "attackable"
+# are now two separate properties - see the note on DEVICE_KINDS.
+#
+# ON THE PHONE'S ADDRESS. It was first recorded here as 46:bf:ec:fd:f8:c6 on
+# 192.168.0.106 - a RANDOMISED address, with the locally-administered bit set,
+# which is what modern handsets use as a per-network private Wi-Fi address.
+# Those rotate, so that entry was only ever good for the captures of the day.
+# It has since been switched to present its real burned-in MAC, recorded above:
+# 48:83:b4:19:b8:13 on 192.168.0.177, globally unique, and stable across
+# networks and reboots.
+#
+# The episode is worth keeping in view rather than deleting, because the
+# failure mode is silent: a rotated MAC does not error, it simply stops
+# matching, and the phone quietly reappears as an unnamed stranger - which
+# reads downstream as a lab device contacting a new outside address. If an
+# unexplained device ever shows up in a capture, check this first.
+BACKGROUND = {"phone"}
+
+# Never a blamed origin, because never scored. features.py builds rows only for
+# names in DEVICE_KINDS, so anything here is invisible to the detector and can
+# never be ranked or accused. This is a WEAKER statement than "never attacked":
+# laptop-i3 is scored and blamable yet must still never be attacked - that
+# stronger, attack-side rule lives in scenario.ORIGINS, not here.
+NEVER_ORIGIN = INFRASTRUCTURE | BACKGROUND
+
+# The suspects - the devices the detector scores and attribution may rank.
+# generate.py leaves infrastructure out of device_names for the same reason,
+# and features.py only ever builds rows for names on this list.
+#
+# BEING SCORED IS NOT THE SAME AS BEING ATTACKABLE. Every ESP32 board is both:
+# scored here, and triggerable through scenario.ORIGINS. laptop-i3 is scored
+# but NOT in ORIGINS - a real, naturally-loud device that is permanently
+# innocent. It is in the ranking on purpose: a noisy-but-benign candidate is
+# the honest stress test for a method that must not just blame whoever is
+# loudest. Its kind is "laptop", so nothing downstream mistakes it for a sensor.
 DEVICE_KINDS = {
     "esp32-01": "sensor",
     "esp32-02": "sensor",
     "esp32-03": "sensor",
+    "laptop-i3": "laptop",   # scored candidate, but NEVER an attack origin
+    # "plug": "plug",                # <- ONLY if the plug can be an origin;
+    #                                #    if it is background, add it to
+    #                                #    BACKGROUND above instead.
 }
+
+# The two tables must not contradict each other. A name that is infrastructure
+# AND a suspect would be scored and blamed despite the comment above saying it
+# never could be, and the failure would be silent.
+assert not (NEVER_ORIGIN & set(DEVICE_KINDS)), (
+    "these names can never be an origin, yet are listed as suspects: %s"
+    % sorted(NEVER_ORIGIN & set(DEVICE_KINDS))
+)
+
+# Every name that must never be blamed has to be RESOLVABLE, or the exclusion
+# silently does nothing: an unmapped phone arrives as a raw MAC, which is not
+# in NEVER_ORIGIN, and the protection never applies to it.
+_unnamed = NEVER_ORIGIN - set(MAC_TO_NAME.values()) - set(IP_TO_NAME.values())
+assert not _unnamed, (
+    "these must never be an origin but no MAC or IP resolves to them: %s"
+    % sorted(_unnamed)
+)
+
+# Addresses are matched lowercase-with-colons, because that is the shape tshark
+# emits. A key written the way a router's admin page shows it - 46-BF-EC-FD-F8-C6
+# - would simply never match, and the device would stay unnamed with no error.
+for _mac in MAC_TO_NAME:
+    assert _mac == _mac.lower().replace("-", ":"), (
+        "MAC keys must be lowercase and colon-separated, not %r" % _mac
+    )
+
+# Every suspect needs a MAC, or it can never appear in a captured run at all -
+# it would sit in the meta file as a device the detector silently never scores.
+_unmapped = set(DEVICE_KINDS) - set(MAC_TO_NAME.values())
+assert not _unmapped, (
+    "these devices are in DEVICE_KINDS but no MAC resolves to them: %s"
+    % sorted(_unmapped)
+)
 
 # Close a flow after this much silence. 60s matches the feature window, so a
 # flow never silently straddles more windows than the thing measuring it.

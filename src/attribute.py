@@ -543,6 +543,24 @@ def attribute(
       5. if first and second place are within 15%, abstain
       6. report the attack path as well as the ranking
     """
+    # ONLY THE INVENTORY CAN BE BLAMED.
+    #
+    # device_names is the asset inventory - the list of machines that are ours
+    # and answerable. Everything else on the wire (the broker, the router, a
+    # phone, a housemate's laptop) is named so the evidence reads clearly, but
+    # is deliberately left off that list, and a device that is off it must
+    # never be ranked, named, or handed to the incident brief as a culprit.
+    #
+    # In practice onsets already cannot contain such a device: detect.py scores
+    # the feature table, and features.py only ever builds rows for names in
+    # device_names. So this filter is a no-op on every path that exists today.
+    # It is here because the cost of being wrong is asymmetric - the failure it
+    # prevents is accusing someone's phone of an intrusion - and because an
+    # invariant that holds only by the good behaviour of two other modules is
+    # one refactor away from not holding at all.
+    lab = set(device_names)
+    onsets = {d: t for d, t in onsets.items() if d in lab}
+
     suspects = list(onsets)
     if not suspects:
         return Attribution(onsets=dict(onsets))

@@ -85,6 +85,29 @@ ANSWER_DIR = ROOT / "groundtruth"
 # it has to run on a bare box that drives hardware, not the analysis stack.
 ORIGINS = ["esp32-01", "esp32-02", "esp32-03"]
 
+# Named devices this script must NEVER trigger an attack against. This is a
+# SUPERSET of capture.NEVER_ORIGIN: alongside the infrastructure and the phone,
+# it lists laptop-i3, which IS a scored candidate the analysis may rank or even
+# blame, but which is a real, permanently-innocent device we have no business
+# attacking. "Blamable" and "attackable" are deliberately different properties
+# now - see the DEVICE_KINDS note in capture.py.
+#
+# Repeated here as plain strings for the same reason ORIGINS is: this file has
+# to run on a bare box that drives hardware and imports nothing from the
+# analysis stack. That duplication is a liability, so tests/test_capture.py
+# checks it against the canonical inventory and fails the build on any drift.
+NEVER_ATTACK = ["broker", "router", "phone", "laptop-i3"]
+
+# The attack is triggered by publishing to ctrl/<origin>, so anything reachable
+# through ORIGINS is something this script can cause to misbehave. Keeping
+# ORIGINS and NEVER_ATTACK disjoint is what stops a typo from firing a trigger
+# at someone's phone - or at laptop-i3 - which would be useless as an
+# experiment and not ours to do.
+assert not (set(ORIGINS) & set(NEVER_ATTACK)), (
+    "these are listed as attackable AND as never-attackable: %s"
+    % sorted(set(ORIGINS) & set(NEVER_ATTACK))
+)
+
 # The broker relays the trigger; it is also the host the beacon lands on.
 BROKER_HOST = "192.168.0.200"
 BROKER_PORT = 1883
