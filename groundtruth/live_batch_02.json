@@ -1,0 +1,30 @@
+{
+  "run_id": "live_batch_02",
+  "scenario": "live",
+  "origin": "esp32-03",
+  "chain": [
+    "esp32-03"
+  ],
+  "via_broker": true,
+  "c2_host": "192.168.0.200:4444",
+  "trigger": {
+    "topic": "ctrl/esp32-03",
+    "payload": "attack",
+    "broker": "192.168.0.200:1883"
+  },
+  "beacon_target": {
+    "host": "192.168.0.200",
+    "port": 4444
+  },
+  "start_time": "2026-09-14T10:30:47+00:00",
+  "start_epoch": 1789381847.663096,
+  "true_onset_epoch": {
+    "esp32-03": 1789381847.663096
+  },
+  "devices": [
+    "esp32-01",
+    "esp32-02",
+    "esp32-03"
+  ],
+  "generated_at": "2026-09-14T10:30:47+00:00"
+}

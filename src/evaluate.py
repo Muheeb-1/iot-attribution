@@ -292,6 +292,13 @@ def main(argv=None) -> int:
                         help="how many runs of each scenario to score")
     parser.add_argument("--hard-only", action="store_true")
     parser.add_argument("--easy-only", action="store_true")
+    parser.add_argument("--prefix", default=None,
+                        help="score runs with this file prefix instead of the "
+                             "simulated hard/easy sets - e.g. --prefix live_batch "
+                             "for captured runs")
+    parser.add_argument("--label", default=None,
+                        help="what to call that set in the scenario column "
+                             "(defaults to --prefix)")
     parser.add_argument("--verbose", action="store_true", help="print a line for every run")
     parser.add_argument("--out", default=str(RESULTS_DIR / "table1.csv"))
     args = parser.parse_args(argv)
@@ -300,10 +307,17 @@ def main(argv=None) -> int:
     all_records = []
 
     scenarios = []
-    if not args.easy_only:
-        scenarios.append(("hard", "run", EXPECTED_HARD_TOP1, EXPECTED_HARD_TOP3))
-    if not args.hard_only:
-        scenarios.append(("easy", "easy", None, None))
+    if args.prefix:
+        # An explicit prefix scores one arbitrary set - captured runs, say.
+        # No expected numbers are passed: EXPECTED_HARD_* are the prototype's
+        # figures for 30 SIMULATED hard runs, and holding a different set of
+        # runs against them would print a "CHECK" flag that means nothing.
+        scenarios.append((args.label or args.prefix, args.prefix, None, None))
+    else:
+        if not args.easy_only:
+            scenarios.append(("hard", "run", EXPECTED_HARD_TOP1, EXPECTED_HARD_TOP3))
+        if not args.hard_only:
+            scenarios.append(("easy", "easy", None, None))
 
     for label, prefix, expected1, expected3 in scenarios:
         print("\n  scoring %s runs..." % label)
@@ -374,7 +388,10 @@ def main(argv=None) -> int:
     out_path.parent.mkdir(parents=True, exist_ok=True)
     table.to_csv(out_path, index=False)
 
-    per_run_path = out_path.with_name("per_run.csv")
+    # Named after the summary table it belongs to. A fixed "per_run.csv" meant
+    # that scoring any other set of runs - captured ones, say - silently
+    # overwrote the simulated set's rows, because --out changed but this did not.
+    per_run_path = out_path.with_name("%s_per_run.csv" % out_path.stem)
     pd.DataFrame(all_records).to_csv(per_run_path, index=False)
 
     print("\n  saved: %s" % out_path)

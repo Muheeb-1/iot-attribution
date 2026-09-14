@@ -44,10 +44,22 @@ results/*.json
 !groundtruth/demo_*.json
 !results/demo_*.json
 
-# ...and the headline results table, which IS the project's finding and
-# should be readable in the repository without re-running anything.
+# ...and the headline results tables, which ARE the project's finding and
+# should be readable in the repository without re-running anything. The
+# per-run files are named after the summary table they belong to, so each
+# summary needs its own exception line beside it.
 !results/table1.csv
-!results/per_run.csv
+!results/table1_per_run.csv
+
+# The live set is the same finding measured against the real lab rather than
+# the simulator, so it is committed on the same reasoning. Its ground truth
+# comes too: without the answer files the live table cannot be re-scored or
+# checked by anyone reading the repository, and unlike the simulated sets
+# there is no generator that can recreate them - the runs happened once.
+!results/table_live.csv
+!results/table_live_per_run.csv
+!results/live_batch_manifest.json
+!groundtruth/live_batch_*.json
 
 # ---- Live lab captures ----
 # Raw packet captures are large binaries (baseline.pcapng alone is ~5 MB) and
