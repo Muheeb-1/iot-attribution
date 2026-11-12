@@ -199,6 +199,16 @@ download button). No new dependency. Sections:
   page labels it "offline / contained", not "attacking".
 - LLM wording is optional: if used, it goes through the existing validator and falls back
   to the deterministic text. The report must be complete with the LLM switched off.
+- **Done 12 Nov** as `src/incident.py` (`build_incident` -> plain dict; `render_html`,
+  `render_text`; `containment_status`; `python -m src.incident <run> [--pcap] [--llm]`).
+  The live engine builds it every analysis cycle, runs the CONTAINED check every cycle on
+  the newest traffic, writes `reports/<session>.html` and, at STOP, `SHA256SUMS.txt` in
+  the session folder. The live page shows all eight sections plus a download button; the
+  replay page offers the same report in an expander. `template_brief` no longer says
+  "spread"/"check the other devices" when one device is flagged. Measured: section 7,
+  "Step 19". Two choices made while building it: no-port flows (ARP/ICMP) are never a
+  section-4 pattern; and "time to detect" in the report is measured from the first
+  unusual CONNECTION (the report may not know the trigger time - that is evaluate.py's).
 - (The old "Step 19 - the multicast fix, measured" is now Step 18, change C1. Its table is
   `results/table_live_fixed.csv`, not `table_live_multicast.csv`. The README must still say
   that C1 was found by studying the 12 captures, C2/C3 by studying rehearsal_01, and that
@@ -241,7 +251,10 @@ download button). No new dependency. Sections:
 baseline_remaining_seconds, packets, flows, devices{name: {latest_score, strikes, onset,
 scores_by_window}}, threshold, onsets, ranking, named, abstained, confidence_percent, path,
 edges, report{...section 5 Step 19...}, first_alert_epoch, contained_epoch,
-verdict_changes[...], rejoins{name: [{window, seconds, epoch}]} (Step 18)`
+verdict_changes[...], rejoins{name: [{window, seconds, epoch}]} (Step 18),
+incident{status, what_happened, when, where, how, why, impact, playbook, unsure,
+containment, wording}, containment{available, device, watching, last_seen_*, quiet_seconds,
+contained, contained_*}, report_file, addresses (Step 19)`
 
 ## 7. Evidence that this works (measured, not assumed)
 
@@ -356,6 +369,24 @@ on (as measured above); new = C1-C3 + C3b. All from the raw captures (`--pcap-di
   10 sessions; old rule: 2).
 - C3b was designed after looking at rehearsal_01/02 and the attack-free captures, like C3.
   The Step 20 sessions remain the independent check.
+
+12 Nov, Step 19 - the incident report and CONTAINED, measured on the real captures:
+- Section 4 on all 14 attack captures (12 segments + 2 rehearsals, new rules): exactly one
+  pattern, for the named board: `broker:4444`, every 30.0 s (median gap), 496 bytes sent /
+  170 back (median wire bytes), 8 packets. 10 connections in each segment, 27 in
+  rehearsal_01, 12 in rehearsal_02. At rehearsal_02's live alert the report already reads
+  "esp32-03 made N connections to broker:4444 every ~30 s, ~496 bytes each".
+- rehearsal_02 time to detect, as the report states it: first beacon 17:28:34 -> alert
+  raised 17:31:38 on hardware = 3 min 04 s (from the trigger: 3 min 54 s - that figure
+  needs the trigger time and so belongs to evaluate.py, Step 20).
+- CONTAINED: no recording contains a real containment yet. Tested by replaying rehearsal_02
+  through the live path with esp32-03's packets removed 275 s after the trigger (as if its
+  power had been pulled): INCIDENT -> CONTAINED exactly 90 s after its last beacon; the
+  verdict stays esp32-03; phases WAITING, LEARNING, MONITORING, INCIDENT, CONTAINED, STOPPED.
+- The live final report equals the offline report on the same packets (what happened,
+  where, how, impact) for rehearsal_02. The report is complete with no language model.
+- Not changed: every verdict, score and table (the report only reads them); table1.csv
+  byte-identical (`detect.baseline_reference` is a pure extraction of robust_scores' maths).
 
 Not testable off the laptop: live capture through Npcap (Step 16a, first day).
 

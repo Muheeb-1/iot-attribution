@@ -4,7 +4,10 @@ Tests for dashboard/live_page.py and the dashboard changes of Step 17.
 The fixtures in tests/fixtures/live_states/ are real state.json files: one per
 phase, recorded by replaying pcap/segments/live_batch_01.pcapng through the
 live engine (session renamed to fixture_session). They are committed, so the
-page tests run on a fresh clone without any capture.
+page tests run on a fresh clone without any capture. Re-recorded in Step 19
+(they now carry the incident report); contained.json comes from
+pcap/live/rehearsal_02.pcapng with esp32-03's packets removed 275 s after the
+trigger, as if its power had been pulled.
 
 Three kinds of test:
 - plain functions: the banner, the strike meter, the clock, session finding;
@@ -29,7 +32,8 @@ from src import detect, live
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "live_states"
 SEGMENTS = ROOT / "pcap" / "segments"
-PHASE_FILES = ["waiting", "learning", "monitoring", "incident", "incident_later", "stopped"]
+PHASE_FILES = ["waiting", "learning", "monitoring", "incident", "incident_later", "contained",
+               "stopped"]
 
 
 def fixture(name):
@@ -57,7 +61,7 @@ def place(live_dir, state, session=None):
 
 def test_there_is_a_fixture_for_every_phase_a_session_passes_through():
     phases = {fixture(n)["phase"] for n in PHASE_FILES}
-    assert phases == {live.WAITING, live.LEARNING, live.MONITORING, live.INCIDENT, live.STOPPED}
+    assert phases == set(live.PHASES)
 
 
 def test_fixtures_carry_what_the_page_needs_to_rebuild_the_ranking():
@@ -351,8 +355,20 @@ def test_the_incident_page_shows_the_verdict_network_suspects_and_brief(tmp_path
     shown = texts(at)
     assert "Incident - the attack started on esp32-02" in shown
     assert "Suspects" in [s.value for s in at.subheader]
-    assert "Incident brief" in [s.value for s in at.subheader]
+    # Step 19: the complete incident report replaces the short brief.
+    assert "Incident report" in [s.value for s in at.subheader]
     assert "nothing is done automatically" in shown
+    assert "spread" not in shown
+
+
+def test_a_state_without_the_report_still_shows_the_brief(tmp_path):
+    """A state.json from before Step 19 (or a failed report) falls back to the brief."""
+    state = fresh(fixture("incident"))
+    state.pop("incident")
+    place(tmp_path, state)
+    at = render(tmp_path, session=state["session"])
+    assert not at.exception
+    assert "Incident brief" in [s.value for s in at.subheader]
 
 
 def test_an_abstaining_incident_renders(tmp_path):

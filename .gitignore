@@ -61,6 +61,12 @@ results/*.json
 !results/live_batch_manifest.json
 !groundtruth/live_batch_*.json
 
+# ---- Incident reports (Step 19) ----
+# reports/<session>.html is regenerated from a session by the live engine or by
+# `python -m src.incident <run>`; it carries lab addresses and file hashes, so
+# it is shared on purpose, not committed by accident.
+reports/
+
 # ---- Live lab captures ----
 # Raw packet captures are large binaries (baseline.pcapng alone is ~5 MB) and
 # are re-creatable by re-running the lab, so they stay out of git. The

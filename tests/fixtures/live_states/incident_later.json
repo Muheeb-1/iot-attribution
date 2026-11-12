@@ -1,7 +1,7 @@
 {
  "session": "fixture_session",
  "phase": "INCIDENT",
- "updated_epoch": 1794473454.047367,
+ "updated_epoch": 1794488952.274324,
  "capture_start_epoch": 1789379977.5977743,
  "now_seconds": 1039.8223690986633,
  "now_epoch": 1789381017.4201434,
@@ -14,7 +14,7 @@
  "consecutive": 3,
  "files_read": 104,
  "packets": 6187,
- "flows": 616,
+ "flows": 604,
  "devices_seen": [
   "esp32-02",
   "esp32-03",
@@ -90,28 +90,28 @@
   "laptop-i3": {
    "kind": "laptop",
    "seen": true,
-   "latest_score": 15.435943051140887,
-   "strikes": 1,
+   "latest_score": 2.4084811084997115,
+   "strikes": 0,
    "onset": null,
    "onset_epoch": null,
    "scores_by_window": {
     "0": 21.971779589502976,
     "1": 1.8011969145113622,
-    "2": 0.5291657063293564,
-    "3": 1.8011969145113622,
-    "4": 0.7075953634256993,
+    "2": 0.678272525785846,
+    "3": 1.8663582578655102,
+    "4": 0.421556724672872,
     "5": 2.048666232093066,
-    "6": 0.5058680696074463,
+    "6": 1.0079543729056417,
     "7": 1.8011969145113622,
-    "8": 15.455264861945718,
-    "9": 1.1046554059895934,
-    "10": 15.01087188855343,
-    "11": 1.6657045992698267,
-    "12": 15.050646654616244,
-    "13": 0.6825275290996652,
-    "14": 15.165399762979765,
-    "15": 0.6323350870093081,
-    "16": 15.435943051140887
+    "8": 2.4084811084997115,
+    "9": 75.47345451105333,
+    "10": 2.4084811084997115,
+    "11": 0.5058680696074463,
+    "12": 2.4084811084997115,
+    "13": 1.2950526076729663,
+    "14": 2.4084811084997115,
+    "15": 0.421556724672872,
+    "16": 2.4084811084997115
    },
    "skipped": false
   }
@@ -147,10 +147,11 @@
  "onset_windows": {
   "esp32-02": 13
  },
+ "rejoins": {},
  "report": {
   "source": "template",
   "brief": {
-   "headline": "A network intrusion was detected. It appears to have started on esp32-02 and spread to other devices.",
+   "headline": "A network intrusion was detected on esp32-02. No other device behaved abnormally.",
    "origin": {
     "device": "esp32-02",
     "confidence": 100,
@@ -162,8 +163,8 @@
      "device": "esp32-02",
      "what_happened": "esp32-02 began behaving differently from its normal pattern.",
      "evidence_ids": [
-      "C000468",
-      "C000486"
+      "C000456",
+      "C000474"
      ]
     }
    ],
@@ -174,13 +175,13 @@
     {
      "order": 1,
      "action": "Disconnect esp32-02 from the network.",
-     "why": "It is the most likely starting point, so isolating it first stops the spread.",
+     "why": "It is the only device behaving abnormally, so isolating it stops the attack.",
      "urgency": "now"
     },
     {
      "order": 2,
-     "action": "Check the other devices listed as affected.",
-     "why": "They may already be compromised and acting on instructions.",
+     "action": "Keep watching the other devices after esp32-02 is isolated.",
+     "why": "None of them was flagged; watching confirms the attack did not reach them.",
      "urgency": "today"
     },
     {
@@ -192,6 +193,304 @@
    ],
    "uncertainty": "Confidence in the starting device is 100% (high). Devices that only received traffic may not appear here, because this analysis sees devices by what they send."
   }
+ },
+ "incident": {
+  "version": 1,
+  "session": "fixture_session",
+  "capture_start_epoch": 1789379977.5977743,
+  "now_seconds": 1029.685706615448,
+  "now_epoch": 1789381007.283481,
+  "baseline_seconds": 720,
+  "threshold": 4.0,
+  "consecutive": 3,
+  "status": "incident",
+  "flagged": [
+   "esp32-02"
+  ],
+  "wording": {
+   "source": "deterministic",
+   "note": "built from the measurements; no language model was used"
+  },
+  "what_happened": {
+   "sentence": "esp32-02 was compromised: from 15:42:22 it opened a new, repeating connection to broker:4444. No other device behaved abnormally.",
+   "spread": false
+  },
+  "when": {
+   "first_unusual_seconds": 765.106142282486,
+   "first_unusual_epoch": 1789380742.7039165,
+   "first_unusual_id": "C000437",
+   "onset_seconds": 780.0,
+   "onset_epoch": 1789380757.5977743,
+   "abnormal_minutes": [
+    {
+     "window": 13,
+     "start_seconds": 780,
+     "start_epoch": 1789380757.5977743,
+     "text": "15:42:37-15:43:37",
+     "score": 5.2
+    },
+    {
+     "window": 14,
+     "start_seconds": 840,
+     "start_epoch": 1789380817.5977743,
+     "text": "15:43:37-15:44:37",
+     "score": 5.2
+    },
+    {
+     "window": 15,
+     "start_seconds": 900,
+     "start_epoch": 1789380877.5977743,
+     "text": "15:44:37-15:45:37",
+     "score": 5.2
+    },
+    {
+     "window": 16,
+     "start_seconds": 960,
+     "start_epoch": 1789380937.5977743,
+     "text": "15:45:37-15:46:37",
+     "score": 7.8
+    }
+   ],
+   "third_minute_closed_seconds": 965.0,
+   "third_minute_closed_epoch": 1789380942.5977743,
+   "alert_seconds": 969.9052772521973,
+   "alert_epoch": 1789380947.5030515,
+   "alert_kind": "raised by the live engine",
+   "time_to_detect_seconds": 204.7991349697113,
+   "sentence": "First unusual connection at 15:42:22 (C000437); first abnormal minute from 15:42:37; alert at 15:45:47 (raised by the live engine) - 3 min 25 s after the first unusual connection."
+  },
+  "where": {
+   "named": "esp32-02",
+   "abstained": false,
+   "shortlist": [
+    "esp32-02"
+   ],
+   "confidence_percent": 100,
+   "confidence_label": "high",
+   "confidence_words": "no other device came close",
+   "ranking": [
+    {
+     "position": 1,
+     "device": "esp32-02",
+     "onset_seconds": 780.0,
+     "onset_text": "15:42:37",
+     "explanation": "story rank 1 (not re-ranked)"
+    }
+   ],
+   "cleared": [
+    "esp32-03",
+    "laptop-i3"
+   ],
+   "not_judged": [],
+   "unseen": [
+    "esp32-01"
+   ],
+   "sentence": "esp32-02, confidence 100% (high: no other device came close)."
+  },
+  "how": {
+   "device": "esp32-02",
+   "patterns": [
+    {
+     "dst": "broker",
+     "dport": 4444,
+     "label": "broker:4444",
+     "count": 9,
+     "first_seconds": 765.106142282486,
+     "first_epoch": 1789380742.7039165,
+     "first_id": "C000437",
+     "last_seconds": 1005.1109399795532,
+     "typical_gap_seconds": 30.00063395500183,
+     "typical_bytes_out": 496,
+     "typical_bytes_in": 170,
+     "conn_ids": [
+      "C000437",
+      "C000456",
+      "C000474",
+      "C000492",
+      "C000507"
+     ]
+    }
+   ],
+   "sentences": [
+    "esp32-02 made 9 connections to broker:4444 every ~30 s, ~496 bytes each, the first at 15:42:22 - it never did this during the baseline."
+   ]
+  },
+  "why": {
+   "device": "esp32-02",
+   "threshold": 4.0,
+   "minutes": [
+    {
+     "window": 13,
+     "text": "15:42:37-15:43:37",
+     "score": 5.2,
+     "over": true
+    },
+    {
+     "window": 14,
+     "text": "15:43:37-15:44:37",
+     "score": 5.2,
+     "over": true
+    },
+    {
+     "window": 15,
+     "text": "15:44:37-15:45:37",
+     "score": 5.2,
+     "over": true
+    },
+    {
+     "window": 16,
+     "text": "15:45:37-15:46:37",
+     "score": 7.8,
+     "over": true
+    }
+   ],
+   "moved": [
+    {
+     "feature": "n_conn",
+     "words": "connections per minute",
+     "normal": 1.0,
+     "during": 3.0,
+     "units": 5.2
+    },
+    {
+     "feature": "n_dst",
+     "words": "different destinations per minute",
+     "normal": 1.0,
+     "during": 2.0,
+     "units": 3.2
+    }
+   ],
+   "evidence_ids": [
+    "C000437",
+    "C000456",
+    "C000474"
+   ],
+   "rejoins": {},
+   "sentence": "esp32-02 scored over the line (4.0) in 4 minutes in a row from 15:42:37; a device is only flagged after 3."
+  },
+  "impact": {
+   "affected": [
+    "esp32-02"
+   ],
+   "reach": {
+    "esp32-02": [
+     {
+      "label": "broker:4444",
+      "count": 8,
+      "new": true,
+      "what": ""
+     },
+     {
+      "label": "broker (no port)",
+      "count": 1,
+      "new": true,
+      "what": ""
+     },
+     {
+      "label": "broadcast (no port)",
+      "count": 4,
+      "new": false,
+      "what": ""
+     }
+    ]
+   },
+   "sentence": "Affected: esp32-02. Only one device behaved abnormally."
+  },
+  "containment": {
+   "available": true,
+   "device": "esp32-02",
+   "watching": [
+    "broker:4444"
+   ],
+   "quiet_needed_seconds": 90.0,
+   "last_seen_seconds": 1035.1114945411682,
+   "last_seen_epoch": 1789381012.7092688,
+   "last_seen_id": "C000599",
+   "quiet_seconds": 4.710874557495117,
+   "contained": false,
+   "contained_seconds": null,
+   "contained_epoch": null
+  },
+  "playbook": [
+   {
+    "step": "contain",
+    "urgency": "now",
+    "title": "Contain it now",
+    "do": [
+     "Isolate esp32-02 (MAC 30:76:f5:e4:eb:60, last seen at 192.168.0.160): pull its power, or block its MAC address on the router.",
+     "Its connections to broker:4444 should then stop.",
+     "Nothing is blocked automatically - the operator does this by hand."
+    ]
+   },
+   {
+    "step": "preserve",
+    "urgency": "now",
+    "title": "Preserve the evidence",
+    "do": [
+     "Do not delete or overwrite the capture: it is the evidence.",
+     "The capture is in C:\\Users\\User\\AppData\\Local\\Temp\\tmphtvs6u3c\\fixture_session.",
+     "Their SHA-256 list is written to SHA256SUMS.txt in that folder when the capture stops.",
+     "To make one file of them: mergecap -w C:\\Users\\User\\AppData\\Local\\Temp\\tmphtvs6u3c\\fixture_session.pcapng C:\\Users\\User\\AppData\\Local\\Temp\\tmphtvs6u3c\\fixture_session\\ring_*.pcapng"
+    ]
+   },
+   {
+    "step": "eradicate",
+    "urgency": "today",
+    "title": "Remove the attacker",
+    "do": [
+     "Re-flash esp32-02 from the known-good firmware (firmware/sensor/sensor.ino).",
+     "Change the Wi-Fi password and the broker credentials it holds; assume anything stored on it is known."
+    ]
+   },
+   {
+    "step": "recover",
+    "urgency": "today",
+    "title": "Reconnect safely",
+    "do": [
+     "Reconnect it only after a fresh session has learned a clean baseline (12 minutes) with it shown as normal."
+    ]
+   },
+   {
+    "step": "verify",
+    "urgency": "now",
+    "title": "Confirm it stopped",
+    "do": [
+     "The engine confirms containment by itself: CONTAINED once esp32-02 has made no connection to broker:4444 for 90 s.",
+     "NOT YET CONTAINED: the last connection from esp32-02 to broker:4444 was at 15:46:52, 5 s ago. Contained is confirmed after 90 s with none."
+    ]
+   }
+  ],
+  "unsure": [
+   "Confidence in the starting device: 100% - high (no other device came close).",
+   "Only one device was flagged. A device that only RECEIVES traffic, or talks to another board directly, can look normal here.",
+   "The capture point (the master laptop) sees only traffic to and from itself plus broadcasts; traffic between two boards over Wi-Fi is invisible.",
+   "The alert needs 3 abnormal minutes in a row, so it comes 3-4 minutes after an attack starts - by design, so one noisy minute never names a device.",
+   "Not seen in this capture at all: esp32-01.",
+   "The method can be confidently wrong; this report is a faithful account of what it measured, not a guarantee."
+  ]
+ },
+ "containment": {
+  "available": true,
+  "device": "esp32-02",
+  "watching": [
+   "broker:4444"
+  ],
+  "quiet_needed_seconds": 90.0,
+  "last_seen_seconds": 1035.1114945411682,
+  "last_seen_epoch": 1789381012.7092688,
+  "last_seen_id": "C000599",
+  "quiet_seconds": 4.710874557495117,
+  "contained": false,
+  "contained_seconds": null,
+  "contained_epoch": null
+ },
+ "report_file": null,
+ "addresses": {
+  "esp32-03": "192.168.0.203",
+  "broker": "192.168.0.200",
+  "esp32-02": "192.168.0.160",
+  "laptop-i3": "192.168.0.218",
+  "router": "192.168.0.254"
  },
  "first_alert": {
   "device": "esp32-02",
@@ -244,6 +543,6 @@
   }
  ],
  "problems": [],
- "analysis_seconds": 0.20348590007051826,
+ "analysis_seconds": 0.21400649996940047,
  "saved_run": null
 }

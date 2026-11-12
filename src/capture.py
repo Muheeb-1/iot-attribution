@@ -508,6 +508,23 @@ def packet_shape(packet: dict):
     return "l2", src, dst, None, None, False
 
 
+def addresses_from_packets(packets, known: dict | None = None) -> dict:
+    """
+    name -> the last IPv4 address each named device sent from, for the
+    incident report's "block this device" line (Step 19). Read from the
+    packets because the flow table keys devices by MAC and keeps no IP - on
+    purpose (see the module docstring). 0.0.0.0 (a device that has no
+    address yet) is skipped. Pass known to continue an earlier result.
+    """
+    found = dict(known or {})
+    for packet in packets:
+        name = MAC_TO_NAME.get((packet.get("eth.src") or "").lower())
+        ip = packet.get("ip.src") or ""
+        if name and ip and ip != UNASSIGNED_IPV4:
+            found[name] = ip
+    return found
+
+
 # --------------------------------------------------------------------------
 # Packets -> flows
 # --------------------------------------------------------------------------

@@ -261,6 +261,33 @@ def rejoins_for_run(run: runs.Run, enabled: bool | None = None) -> dict:
                           run.window_seconds)
 
 
+def baseline_reference(baseline: pd.DataFrame):
+    """
+    What one device usually does, and how much it usually varies: the median
+    and the robust spread (MAD x 1.4826) of each of the seven features over
+    its baseline rows. robust_scores measures every minute against exactly
+    these two; the incident report (src/incident.py) uses them to say which
+    measurements moved, so its "normal" is the detector's normal.
+    """
+    columns = features.FEATURE_COLUMNS
+
+    # What this device usually does.
+    middle = baseline[columns].median()
+
+    # How much it usually varies, measured robustly.
+    spread = (baseline[columns] - middle).abs().median() * 1.4826
+
+    # A feature that never varied at all in the baseline has spread 0, which
+    # would divide by zero and make every later value infinitely surprising.
+    # Fall back to the ordinary standard deviation, and failing that to 1.
+    spread = (
+        spread.replace(0, np.nan)
+        .fillna(baseline[columns].std().replace(0, 1))
+        .clip(lower=1e-6)
+    )
+    return middle, spread
+
+
 def robust_scores(
     device_table: pd.DataFrame,
     baseline_windows: int,
@@ -281,21 +308,7 @@ def robust_scores(
         in_baseline = in_baseline & ~device_table["w"].isin(list(left_out)).values
     baseline = device_table[in_baseline]
     columns = features.FEATURE_COLUMNS
-
-    # What this device usually does.
-    middle = baseline[columns].median()
-
-    # How much it usually varies, measured robustly.
-    spread = (baseline[columns] - middle).abs().median() * 1.4826
-
-    # A feature that never varied at all in the baseline has spread 0, which
-    # would divide by zero and make every later value infinitely surprising.
-    # Fall back to the ordinary standard deviation, and failing that to 1.
-    spread = (
-        spread.replace(0, np.nan)
-        .fillna(baseline[columns].std().replace(0, 1))
-        .clip(lower=1e-6)
-    )
+    middle, spread = baseline_reference(baseline)
 
     # How many "robust standard deviations" from usual, per feature.
     distance = (device_table[columns] - middle).abs() / spread

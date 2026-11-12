@@ -805,6 +805,12 @@ def template_brief(evidence: dict, run: runs.Run,
     """
     named = evidence["named_device"]
     abstained = evidence["verdict"] == "abstain"
+    # Step 19: "spread" only when the facts say so. In 10 of the 12 real
+    # attacks only the board itself was flagged, and the old wording ("and
+    # spread to other devices", "check the other devices listed as affected")
+    # told the reader something that had not happened.
+    flagged = [d["device"] for d in evidence["devices"] if d["flagged"]]
+    spread = len(flagged) > 1
 
     if abstained:
         headline = (
@@ -813,10 +819,16 @@ def template_brief(evidence: dict, run: runs.Run,
             % ", ".join(evidence["shortlist"])
         )
         origin_device = evidence["shortlist"][0] if evidence["shortlist"] else run.device_names[0]
-    else:
+    elif spread:
         headline = (
             "A network intrusion was detected. It appears to have started on "
             "%s and spread to other devices." % named
+        )
+        origin_device = named
+    else:
+        headline = (
+            "A network intrusion was detected on %s. No other device behaved "
+            "abnormally." % named
         )
         origin_device = named
 
@@ -837,20 +849,33 @@ def template_brief(evidence: dict, run: runs.Run,
             evidence_ids=ids,
         ))
 
-    actions = [
-        RecommendedAction(
-            order=1,
-            action="Disconnect %s from the network." % origin_device,
-            why="It is the most likely starting point, so isolating it first "
-                "stops the spread.",
-            urgency="now",
-        ),
-        RecommendedAction(
+    if spread or abstained:
+        first_why = ("It is the most likely starting point, so isolating it first "
+                     "stops the spread.")
+        second = RecommendedAction(
             order=2,
             action="Check the other devices listed as affected.",
             why="They may already be compromised and acting on instructions.",
             urgency="today",
+        )
+    else:
+        first_why = ("It is the only device behaving abnormally, so isolating it "
+                     "stops the attack.")
+        second = RecommendedAction(
+            order=2,
+            action="Keep watching the other devices after %s is isolated." % origin_device,
+            why="None of them was flagged; watching confirms the attack did not "
+                "reach them.",
+            urgency="today",
+        )
+    actions = [
+        RecommendedAction(
+            order=1,
+            action="Disconnect %s from the network." % origin_device,
+            why=first_why,
+            urgency="now",
         ),
+        second,
         RecommendedAction(
             order=3,
             action="Change the passwords and keys used by these devices.",

@@ -61,7 +61,7 @@ if str(ROOT) not in sys.path:
 import plotly.graph_objects as go
 import streamlit as st
 
-from src import attribute, detect, features, report, runs
+from src import attribute, detect, features, incident, report, runs
 
 # Colours, chosen to stay legible on Streamlit's light and dark themes.
 COLOUR_ORIGIN = "#d62728"      # the named origin - red
@@ -290,6 +290,15 @@ def ranking_rows(result: attribute.Attribution, detection: detect.Detection,
             "shortlisted": device in result.shortlist,
         })
     return rows
+
+
+def start_epoch(run_id: str):
+    """The capture's wall-clock start, if the run recorded it (live sessions do)."""
+    try:
+        meta = json.loads(runs.meta_path(run_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return meta.get("capture_start_epoch")
 
 
 def load_answer_for_display(run_id: str):
@@ -577,6 +586,25 @@ def replay_page() -> None:
         st.markdown("%d. **[%s]** %s  \n   *%s*"
                     % (action.order, action.urgency.upper(), action.action,
                        action.why))
+
+    # ---- the complete incident report (Step 19) -------------------------
+    # The same eight-section report the live page shows, built from this
+    # run's own analysis - so the last rung of the fallback ladder has it too.
+    # Deterministic; a model's headline is added only if it passed the
+    # validator above.
+    if detection.onsets and result.ranking:
+        try:
+            full = incident.wording_from_brief(
+                incident.build_incident(run, detection, result,
+                                        capture_start_epoch=start_epoch(run_id)),
+                outcome if not outcome.is_fallback else None)
+            with st.expander("The complete incident report (eight sections)"):
+                st.download_button("Download it (HTML, print to PDF from the browser)",
+                                   data=incident.render_html(full),
+                                   file_name="%s.html" % run_id, mime="text/html")
+                st.text(incident.render_text(full))
+        except Exception as exc:          # presentation only: never break the page
+            st.caption("The complete report could not be built (%s)." % exc)
 
     # ---- the evidence behind it ----------------------------------------
     with st.expander("The evidence behind this verdict"):

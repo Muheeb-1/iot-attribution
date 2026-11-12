@@ -45,6 +45,13 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   segments + both rehearsals); rejoin minutes only esp32-02 @11 in rehearsal_01; laptop never
   flagged; attack-free 0 false alarms, laptop not judged in 2 of 10 (was 7); table1.csv
   byte-identical. Step 18's tables kept as `*_step18.csv`.
+- Step 19 (incident report): `src/incident.py` - eight sections built from the measurements
+  (no LLM needed), CONTAINED check (90 s without a connection to the section-4
+  destinations), `reports/<session>.html` (gitignored), SHA256SUMS.txt at STOP. Live page
+  shows it + download; replay page has it in an expander. `template_brief` says "spread"
+  only when >1 device is flagged. CONTAINED was tested only by replaying rehearsal_02 with
+  the board's packets cut - the first real containment is the next hardware run.
+- Next: Step 20 (fresh sessions, contain by hand, wait for CONTAINED), then Step 21.
 
 ## Now - final phase, approved 11 Nov 2026
 
@@ -128,6 +135,7 @@ python -m src.evaluate [--rules old|step18] --prefix rehearsal --label rehearsal
 python -m src.evaluate [--rules old] --false-alarms pcap/baseline.pcapng pcap/baseline2.pcapng --out results/false_alarms_fixed.csv
 python -m src.live --session <name> [--replay <pcap>] [--speed 20]   # live engine (Step 15)
 python -m src.live_capture --session <name>          # ADMINISTRATOR terminal: the capture
+python -m src.incident <run_id> [--pcap <file>] [--llm local|cloud]   # full report -> reports/<run_id>.html
 python -m src.capture pcap\<file>.pcapng --run <run_id> --baseline 720
 streamlit run dashboard/app.py
 python -m src.listener                                # beacon sink, on the master laptop
@@ -140,7 +148,12 @@ python -m src.scenario --run <run_id> [--origin esp32-02]   # one attack, answer
   connection ids cited beside it (found in Step 14).
 - Firmware has the Wi-Fi credentials hardcoded in a tracked, public file. Deferred until
   after the demo (changing them means re-flashing both boards). Do not touch before then.
-- `report.template_brief` always says the attack "spread to other devices", even when one
-  device is flagged (10 of the 12 real runs). Fixed in Step 19.
-- (Fixed: Step 18's rejoin rule catching the laptop's DHCP INFORM - Step 18b. the `capture.endpoint_name` multicast bug in Step 18; the stale "qwen3:4b"
+- DEMO RISK (since Step 18, measured 12 Nov): the saved `data/live_batch_*` and
+  `data/rehearsal_01` runs were converted under the OLD naming rule (no C1). The replay page
+  analyses them as saved under the NEW rules (C2 without C1), and names the right board in
+  only 4 of 12 live_batch runs (live_batch_05 and rehearsal_01: laptop-i3; 7 abstain).
+  `data/rehearsal_02` (saved by the live engine, new rules) is correct. Fix needs Muheeb's
+  decision: e.g. re-convert the captures into NEW run ids (data/ originals untouched).
+- (Fixed: the template's "spread to other devices" wording - Step 19. Step 18's rejoin rule
+  catching the laptop's DHCP INFORM - Step 18b. the `capture.endpoint_name` multicast bug in Step 18; the stale "qwen3:4b"
   sidebar text and the missing provider choice in Step 17.)

@@ -1,0 +1,557 @@
+{
+ "session": "fixture_session",
+ "phase": "CONTAINED",
+ "updated_epoch": 1794488988.1661017,
+ "capture_start_epoch": 1794483624.3318088,
+ "now_seconds": 1399.9371538162231,
+ "now_epoch": 1794485024.2689626,
+ "baseline_seconds": 720,
+ "baseline_windows": 12,
+ "baseline_remaining_seconds": 0.0,
+ "window_seconds": 60,
+ "grace_seconds": 5.0,
+ "closed_windows": 23,
+ "consecutive": 3,
+ "files_read": 140,
+ "packets": 8347,
+ "flows": 811,
+ "devices_seen": [
+  "esp32-02",
+  "esp32-03",
+  "laptop-i3"
+ ],
+ "devices": {
+  "esp32-01": {
+   "kind": "sensor",
+   "seen": false,
+   "latest_score": null,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {},
+   "skipped": false
+  },
+  "esp32-02": {
+   "kind": "sensor",
+   "seen": true,
+   "latest_score": 0.0,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {
+    "0": 4.974937141614924,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.0,
+    "14": 0.0,
+    "15": 0.0,
+    "16": 0.0,
+    "17": 0.0,
+    "18": 0.0,
+    "19": 0.0,
+    "20": 0.0,
+    "21": 0.0,
+    "22": 0.0
+   },
+   "skipped": false
+  },
+  "esp32-03": {
+   "kind": "sensor",
+   "seen": true,
+   "latest_score": 2.598076211353316,
+   "strikes": 3,
+   "onset": 1080.0,
+   "onset_epoch": 1794484704.3318088,
+   "scores_by_window": {
+    "0": 4.974937141614924,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.0,
+    "14": 0.0,
+    "15": 0.0,
+    "16": 0.0,
+    "17": 0.0,
+    "18": 5.196152422706632,
+    "19": 5.196152422706632,
+    "20": 5.196152422706632,
+    "21": 2.598076211353316
+   },
+   "skipped": false
+  },
+  "laptop-i3": {
+   "kind": "laptop",
+   "seen": true,
+   "latest_score": 2.52239588047938,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {
+    "0": 37.84776422372538,
+    "1": 1.8916430035849914,
+    "2": 3.213166896761811,
+    "3": 1.5699033315644961,
+    "4": 0.5408780624963934,
+    "5": 2.4084811084997115,
+    "6": 1.0077213132656273,
+    "7": 0.421556724672872,
+    "8": 2.4084811084997115,
+    "9": 0.9458215017924957,
+    "10": 0.9458215017924957,
+    "11": 0.421556724672872,
+    "12": 0.9458215017924957,
+    "13": 1.9514198581447983,
+    "14": 2.4084811084997115,
+    "15": 0.9458215017924957,
+    "16": 1.8916430035849914,
+    "17": 3.1734733336860232,
+    "18": 1.8916430035849914,
+    "19": 1.5731078132190175,
+    "20": 1.8916430035849914,
+    "21": 2.256756586702523,
+    "22": 2.52239588047938
+   },
+   "skipped": false
+  }
+ },
+ "threshold": 4.0,
+ "onsets": {
+  "esp32-03": 1080.0
+ },
+ "ranking": [
+  "esp32-03"
+ ],
+ "named": "esp32-03",
+ "abstained": false,
+ "shortlist": [
+  "esp32-03"
+ ],
+ "confidence_percent": 100,
+ "path": [
+  "esp32-03"
+ ],
+ "edges": [],
+ "confidence": 1.0,
+ "scores": {
+  "esp32-03": 0.5959567209279657
+ },
+ "story_ranking": [
+  "esp32-03"
+ ],
+ "indicator_bonus": {},
+ "explanations": {
+  "esp32-03": "story rank 1 (not re-ranked)"
+ },
+ "onset_windows": {
+  "esp32-03": 18
+ },
+ "rejoins": {},
+ "report": {
+  "source": "template",
+  "brief": {
+   "headline": "A network intrusion was detected on esp32-03. No other device behaved abnormally.",
+   "origin": {
+    "device": "esp32-03",
+    "confidence": 100,
+    "label": "high"
+   },
+   "timeline": [
+    {
+     "time": "00:18:00",
+     "device": "esp32-03",
+     "what_happened": "esp32-03 began behaving differently from its normal pattern.",
+     "evidence_ids": [
+      "C000627",
+      "C000644"
+     ]
+    }
+   ],
+   "affected_devices": [
+    "esp32-03"
+   ],
+   "actions": [
+    {
+     "order": 1,
+     "action": "Disconnect esp32-03 from the network.",
+     "why": "It is the only device behaving abnormally, so isolating it stops the attack.",
+     "urgency": "now"
+    },
+    {
+     "order": 2,
+     "action": "Keep watching the other devices after esp32-03 is isolated.",
+     "why": "None of them was flagged; watching confirms the attack did not reach them.",
+     "urgency": "today"
+    },
+    {
+     "order": 3,
+     "action": "Change the passwords and keys used by these devices.",
+     "why": "Any credentials on a compromised device should be assumed known.",
+     "urgency": "this week"
+    }
+   ],
+   "uncertainty": "Confidence in the starting device is 100% (high). Devices that only received traffic may not appear here, because this analysis sees devices by what they send."
+  }
+ },
+ "incident": {
+  "version": 1,
+  "session": "fixture_session",
+  "capture_start_epoch": 1794483624.3318088,
+  "now_seconds": 1389.5830624103546,
+  "now_epoch": 1794485013.9148712,
+  "baseline_seconds": 720,
+  "threshold": 4.0,
+  "consecutive": 3,
+  "status": "contained",
+  "flagged": [
+   "esp32-03"
+  ],
+  "wording": {
+   "source": "deterministic",
+   "note": "built from the measurements; no language model was used"
+  },
+  "what_happened": {
+   "sentence": "esp32-03 was compromised: from 17:28:34 it opened a new, repeating connection to broker:4444. No other device behaved abnormally.",
+   "spread": false
+  },
+  "when": {
+   "first_unusual_seconds": 1090.1753404140472,
+   "first_unusual_epoch": 1794484714.5071492,
+   "first_unusual_id": "C000627",
+   "onset_seconds": 1080.0,
+   "onset_epoch": 1794484704.3318088,
+   "abnormal_minutes": [
+    {
+     "window": 18,
+     "start_seconds": 1080,
+     "start_epoch": 1794484704.3318088,
+     "text": "17:28:24-17:29:24",
+     "score": 5.2
+    },
+    {
+     "window": 19,
+     "start_seconds": 1140,
+     "start_epoch": 1794484764.3318088,
+     "text": "17:29:24-17:30:24",
+     "score": 5.2
+    },
+    {
+     "window": 20,
+     "start_seconds": 1200,
+     "start_epoch": 1794484824.3318088,
+     "text": "17:30:24-17:31:24",
+     "score": 5.2
+    }
+   ],
+   "third_minute_closed_seconds": 1265.0,
+   "third_minute_closed_epoch": 1794484889.3318088,
+   "alert_seconds": 1269.4801054000854,
+   "alert_epoch": 1794484893.8119142,
+   "alert_kind": "raised by the live engine",
+   "time_to_detect_seconds": 179.3047649860382,
+   "sentence": "First unusual connection at 17:28:34 (C000627); first abnormal minute from 17:28:24; alert at 17:31:33 (raised by the live engine) - 2 min 59 s after the first unusual connection."
+  },
+  "where": {
+   "named": "esp32-03",
+   "abstained": false,
+   "shortlist": [
+    "esp32-03"
+   ],
+   "confidence_percent": 100,
+   "confidence_label": "high",
+   "confidence_words": "no other device came close",
+   "ranking": [
+    {
+     "position": 1,
+     "device": "esp32-03",
+     "onset_seconds": 1080.0,
+     "onset_text": "17:28:24",
+     "explanation": "story rank 1 (not re-ranked)"
+    }
+   ],
+   "cleared": [
+    "esp32-02",
+    "laptop-i3"
+   ],
+   "not_judged": [],
+   "unseen": [
+    "esp32-01"
+   ],
+   "sentence": "esp32-03, confidence 100% (high: no other device came close)."
+  },
+  "how": {
+   "device": "esp32-03",
+   "patterns": [
+    {
+     "dst": "broker",
+     "dport": 4444,
+     "label": "broker:4444",
+     "count": 8,
+     "first_seconds": 1090.1753404140472,
+     "first_epoch": 1794484714.5071492,
+     "first_id": "C000627",
+     "last_seconds": 1300.1786818504333,
+     "typical_gap_seconds": 30.000788688659668,
+     "typical_bytes_out": 496,
+     "typical_bytes_in": 170,
+     "conn_ids": [
+      "C000627",
+      "C000644",
+      "C000663",
+      "C000680",
+      "C000699"
+     ]
+    }
+   ],
+   "sentences": [
+    "esp32-03 made 8 connections to broker:4444 every ~30 s, ~496 bytes each, the first at 17:28:34 - it never did this during the baseline."
+   ]
+  },
+  "why": {
+   "device": "esp32-03",
+   "threshold": 4.0,
+   "minutes": [
+    {
+     "window": 18,
+     "text": "17:28:24-17:29:24",
+     "score": 5.2,
+     "over": true
+    },
+    {
+     "window": 19,
+     "text": "17:29:24-17:30:24",
+     "score": 5.2,
+     "over": true
+    },
+    {
+     "window": 20,
+     "text": "17:30:24-17:31:24",
+     "score": 5.2,
+     "over": true
+    },
+    {
+     "window": 21,
+     "text": "17:31:24-17:32:24",
+     "score": 2.6,
+     "over": false
+    }
+   ],
+   "moved": [
+    {
+     "feature": "n_conn",
+     "words": "connections per minute",
+     "normal": 1.0,
+     "during": 3.0,
+     "units": 5.2
+    },
+    {
+     "feature": "n_dst",
+     "words": "different destinations per minute",
+     "normal": 1.0,
+     "during": 2.0,
+     "units": 3.2
+    }
+   ],
+   "evidence_ids": [
+    "C000627",
+    "C000644",
+    "C000663"
+   ],
+   "rejoins": {},
+   "sentence": "esp32-03 scored over the line (4.0) in 3 minutes in a row from 17:28:24; a device is only flagged after 3."
+  },
+  "impact": {
+   "affected": [
+    "esp32-03"
+   ],
+   "reach": {
+    "esp32-03": [
+     {
+      "label": "broker:4444",
+      "count": 8,
+      "new": true,
+      "what": ""
+     },
+     {
+      "label": "broadcast (no port)",
+      "count": 3,
+      "new": false,
+      "what": ""
+     }
+    ]
+   },
+   "sentence": "Affected: esp32-03. Only one device behaved abnormally."
+  },
+  "containment": {
+   "available": true,
+   "device": "esp32-03",
+   "watching": [
+    "broker:4444"
+   ],
+   "quiet_needed_seconds": 90.0,
+   "last_seen_seconds": 1300.1786818504333,
+   "last_seen_epoch": 1794484924.5104907,
+   "last_seen_id": "C000754",
+   "quiet_seconds": 99.7584719657898,
+   "contained": true,
+   "contained_seconds": 1390.1786818504333,
+   "contained_epoch": 1794485014.5104907
+  },
+  "playbook": [
+   {
+    "step": "contain",
+    "urgency": "now",
+    "title": "Contain it now",
+    "do": [
+     "Isolate esp32-03 (MAC 30:76:f5:e5:e5:ac, last seen at 192.168.0.203): pull its power, or block its MAC address on the router.",
+     "Its connections to broker:4444 should then stop.",
+     "Nothing is blocked automatically - the operator does this by hand."
+    ]
+   },
+   {
+    "step": "preserve",
+    "urgency": "now",
+    "title": "Preserve the evidence",
+    "do": [
+     "Do not delete or overwrite the capture: it is the evidence.",
+     "The capture is in C:\\Users\\User\\AppData\\Local\\Temp\\tmphtvs6u3c\\fixture_session.",
+     "Their SHA-256 list is written to SHA256SUMS.txt in that folder when the capture stops.",
+     "To make one file of them: mergecap -w C:\\Users\\User\\AppData\\Local\\Temp\\tmphtvs6u3c\\fixture_session.pcapng C:\\Users\\User\\AppData\\Local\\Temp\\tmphtvs6u3c\\fixture_session\\ring_*.pcapng"
+    ]
+   },
+   {
+    "step": "eradicate",
+    "urgency": "today",
+    "title": "Remove the attacker",
+    "do": [
+     "Re-flash esp32-03 from the known-good firmware (firmware/sensor/sensor.ino).",
+     "Change the Wi-Fi password and the broker credentials it holds; assume anything stored on it is known."
+    ]
+   },
+   {
+    "step": "recover",
+    "urgency": "today",
+    "title": "Reconnect safely",
+    "do": [
+     "Reconnect it only after a fresh session has learned a clean baseline (12 minutes) with it shown as normal."
+    ]
+   },
+   {
+    "step": "verify",
+    "urgency": "now",
+    "title": "Confirm it stopped",
+    "do": [
+     "The engine confirms containment by itself: CONTAINED once esp32-03 has made no connection to broker:4444 for 90 s.",
+     "CONTAINED at 17:33:34: esp32-03 has made no connection to broker:4444 since 17:32:04 (C000754)."
+    ]
+   }
+  ],
+  "unsure": [
+   "Confidence in the starting device: 100% - high (no other device came close).",
+   "Only one device was flagged. A device that only RECEIVES traffic, or talks to another board directly, can look normal here.",
+   "The capture point (the master laptop) sees only traffic to and from itself plus broadcasts; traffic between two boards over Wi-Fi is invisible.",
+   "The alert needs 3 abnormal minutes in a row, so it comes 3-4 minutes after an attack starts - by design, so one noisy minute never names a device.",
+   "Not seen in this capture at all: esp32-01.",
+   "The method can be confidently wrong; this report is a faithful account of what it measured, not a guarantee."
+  ]
+ },
+ "containment": {
+  "available": true,
+  "device": "esp32-03",
+  "watching": [
+   "broker:4444"
+  ],
+  "quiet_needed_seconds": 90.0,
+  "last_seen_seconds": 1300.1786818504333,
+  "last_seen_epoch": 1794484924.5104907,
+  "last_seen_id": "C000754",
+  "quiet_seconds": 99.7584719657898,
+  "contained": true,
+  "contained_seconds": 1390.1786818504333,
+  "contained_epoch": 1794485014.5104907
+ },
+ "report_file": null,
+ "addresses": {
+  "laptop-i3": "192.168.0.218",
+  "broker": "192.168.0.200",
+  "esp32-02": "192.168.0.160",
+  "esp32-03": "192.168.0.203",
+  "router": "192.168.0.254"
+ },
+ "first_alert": {
+  "device": "esp32-03",
+  "onset_seconds": 1080.0,
+  "closed_seconds": 1265.0,
+  "raised_seconds": 1269.4801054000854,
+  "closed_epoch": 1794484889.3318088,
+  "raised_epoch": 1794484893.8119142,
+  "found_at_stop": false
+ },
+ "first_alert_epoch": 1794484893.8119142,
+ "first_alert_closed_epoch": 1794484889.3318088,
+ "contained_epoch": 1794485014.5104907,
+ "verdict_changes": [
+  {
+   "seconds": 1269.4801054000854,
+   "epoch": 1794484893.8119142,
+   "named": "esp32-03",
+   "abstained": false,
+   "confidence_percent": 100,
+   "ranking": [
+    "esp32-03"
+   ],
+   "onsets": {
+    "esp32-03": 1080.0
+   },
+   "final": false
+  }
+ ],
+ "phase_log": [
+  {
+   "phase": "WAITING",
+   "seconds": null,
+   "epoch": null
+  },
+  {
+   "phase": "LEARNING",
+   "seconds": 9.245028018951416,
+   "epoch": 1794483633.5768368
+  },
+  {
+   "phase": "MONITORING",
+   "seconds": 729.9745450019836,
+   "epoch": 1794484354.3063538
+  },
+  {
+   "phase": "INCIDENT",
+   "seconds": 1269.4801054000854,
+   "epoch": 1794484893.8119142
+  },
+  {
+   "phase": "CONTAINED",
+   "seconds": 1399.9371538162231,
+   "epoch": 1794485024.2689626
+  }
+ ],
+ "problems": [],
+ "analysis_seconds": 0.23940369999036193,
+ "saved_run": null
+}

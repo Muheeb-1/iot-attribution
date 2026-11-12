@@ -10,7 +10,9 @@ rewrites every second or so, and redraws itself every 3 seconds:
   LEARNING    the baseline countdown - do not attack yet
   MONITORING  "safe to launch the attack"; every device's strike meter
   INCIDENT    red banner: which device it started from, how sure, since when;
-              the network, the suspects, the incident brief
+              the network, the suspects, the full incident report (Step 19)
+  CONTAINED   green banner on top of the report: the named device has made no
+              connection to its new destinations for 90 s
   STOPPED     the final verdict (identical to the offline analysis), where the
               session was saved, and the "reveal the true answer" tick
 
@@ -67,7 +69,7 @@ import plotly.graph_objects as go
 import streamlit as st
 
 from dashboard import app
-from src import attribute, detect, live, runs
+from src import attribute, detect, incident, live, runs
 
 REFRESH_SECONDS = 3
 
@@ -232,8 +234,16 @@ def device_rows(state: dict) -> list:
     for name, d in (state.get("devices") or {}).items():
         strikes = int(d.get("strikes") or 0)
         score = d.get("latest_score")
+        contained = (state.get("containment") or {})
         if not d.get("seen"):
             status, label = "unseen", "not seen in this capture"
+        elif d.get("onset") is not None and contained.get("contained") \
+                and contained.get("device") == name:
+            # Unplugged or blocked: still marked abnormal by the detector (it
+            # went silent), but it is not attacking any more.
+            status = "contained"
+            label = "offline / contained since %s (abnormal since %s)" % (
+                wall(contained.get("contained_epoch")), wall(d.get("onset_epoch")))
         elif d.get("onset") is not None:
             status = "flagged"
             label = "abnormal since %s (%d of %d minutes over the line)" % (
@@ -291,6 +301,15 @@ def headline(state: dict) -> dict:
         return {"kind": "info", "title": PHASE_LABEL.get(phase, phase), "text": ""}
 
     since = wall(alert.get("raised_epoch"))
+    contained = state.get("containment") or {}
+    if phase == live.CONTAINED and contained.get("contained"):
+        return {"kind": "success",
+                "title": "Contained at %s - %s has stopped" % (
+                    wall(contained.get("contained_epoch")), contained.get("device")),
+                "text": "No connection from %s to %s since %s. The incident report below "
+                        "stays as the record; stop the capture when you are ready."
+                        % (contained.get("device"), ", ".join(contained.get("watching") or []),
+                           wall(contained.get("last_seen_epoch")))}
     prefix = "Final verdict: " if phase == live.STOPPED else ""
     if state.get("abstained"):
         return {"kind": "warning",
@@ -512,6 +531,10 @@ def draw_state(state: dict, live_dir: Path, reveal: bool = False) -> None:
     if phase == live.MONITORING:
         st.markdown("Launch the attack from another terminal:")
         st.code("python -m src.scenario --run %s" % session, language="powershell")
+    if phase == live.INCIDENT:
+        line = containment_text(state)
+        if line:
+            st.warning(line)
 
     for line in verdict_change_lines(state):
         st.caption(line)
@@ -587,7 +610,105 @@ def draw_state(state: dict, live_dir: Path, reveal: bool = False) -> None:
             st.progress(row["bar"])
             st.caption("went abnormal %s · %s" % (row["onset"], row["explanation"]))
 
-    draw_brief(state)
+    if state.get("incident") and state["incident"].get("status") not in ("failed", None):
+        draw_report(state)
+    else:
+        if (state.get("incident") or {}).get("status") == "failed":
+            st.warning("The incident report could not be built (%s); the brief is shown "
+                       "instead. The verdict above stands."
+                       % state["incident"].get("error", "unknown error"))
+        draw_brief(state)
+
+
+def containment_text(state: dict) -> str | None:
+    """The CONTAINED check in one line, or None before there is an incident."""
+    c = state.get("containment")
+    if not c:
+        return None
+    return incident.containment_line(c, state.get("capture_start_epoch"))
+
+
+def draw_report(state: dict) -> None:
+    """
+    The Step 19 incident report - every section, as the engine wrote it into
+    state.json. Nothing is recomputed here; the download is the same report as
+    the HTML file the engine writes to reports/<session>.html.
+    """
+    r = state["incident"]
+    start = r.get("capture_start_epoch")
+    st.divider()
+    st.subheader("Incident report")
+    st.download_button("Download the report (HTML, print to PDF from the browser)",
+                       data=incident.render_html(r),
+                       file_name="%s.html" % r.get("session", "incident"),
+                       mime="text/html", key="report-download")
+    if state.get("report_file"):
+        st.caption("Also saved as `%s`." % state["report_file"])
+
+    st.markdown("**1. What happened**")
+    st.markdown("### %s" % r["what_happened"]["sentence"])
+    if r.get("wording", {}).get("source") == "llm":
+        st.caption("In other words: %s" % r["wording"]["headline"])
+    if r.get("status") == "no incident":
+        return
+
+    w = r["when"]
+    st.markdown("**2. When**")
+    st.write(w["sentence"])
+    if w["abnormal_minutes"]:
+        st.caption("Abnormal minutes: " + " · ".join(
+            "%s (%.1f)" % (m["text"], m["score"]) for m in w["abnormal_minutes"]))
+
+    where = r["where"]
+    st.markdown("**3. Where it started**")
+    st.write(where["sentence"])
+    for row in where["ranking"]:
+        st.caption("%d. `%s` - abnormal from %s - %s"
+                   % (row["position"], row["device"], row["onset_text"], row["explanation"]))
+    if where.get("cleared"):
+        st.caption("Stayed normal: %s" % ", ".join("`%s`" % d for d in where["cleared"]))
+    if where.get("not_judged"):
+        st.caption("Not judged (too little baseline traffic): %s" % ", ".join(where["not_judged"]))
+
+    st.markdown("**4. How**")
+    for line in r["how"]["sentences"]:
+        st.write(line)
+    pats = r["how"]["patterns"]
+    if pats:
+        st.dataframe(pd.DataFrame([{
+            "destination": x["label"], "connections": x["count"],
+            "first": incident.clock_text(x["first_seconds"], start),
+            "typical gap": "~%d s" % round(x["typical_gap_seconds"])
+            if x["typical_gap_seconds"] is not None else "-",
+            "bytes sent": x["typical_bytes_out"], "bytes back": x["typical_bytes_in"],
+            "first ids": ", ".join(x["conn_ids"][:3])} for x in pats]),
+            hide_index=True, use_container_width=True)
+
+    why = r["why"]
+    st.markdown("**5. Why we believe it**")
+    st.write(why["sentence"])
+    if why["moved"]:
+        st.caption("What moved: " + "; ".join(
+            "%s - normally %s, during the attack %s" % (m["words"], m["normal"], m["during"])
+            for m in why["moved"]))
+    st.caption("Evidence connections: %s" % ", ".join(why["evidence_ids"]))
+
+    imp = r["impact"]
+    st.markdown("**6. Impact**")
+    st.write(imp["sentence"])
+    for dev, rows in imp["reach"].items():
+        st.caption("`%s` talked to: %s" % (dev, ", ".join(
+            "%s%s ×%d" % (x["label"], " (NEW)" if x["new"] else "", x["count"]) for x in rows)))
+
+    st.markdown("**7. What to do** (recommended - the operator acts; nothing is done "
+                "automatically)")
+    for i, step in enumerate(r["playbook"], 1):
+        st.markdown("%d. **[%s] %s**  \n%s" % (i, step["urgency"].upper(), step["title"],
+                                                "  \n".join("   - %s" % d for d in step["do"])))
+
+    st.markdown("**8. What we are not sure about**")
+    st.info("  \n".join("- %s" % u for u in r["unsure"]))
+    st.caption(r.get("wording", {}).get("note", ""))
 
 
 def draw_brief(state: dict) -> None:

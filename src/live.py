@@ -15,7 +15,10 @@ writes the answer to state.json, which the live dashboard page reads.
     this file: each FINISHED file -> capture.read_packets
                each CLOSED minute  -> build_flows -> build_features
                                       -> detect -> attribute -> template brief
+                                      -> the incident report (src/incident.py)
+               every cycle         -> the CONTAINED check on the newest traffic
                -> pcap/live/<session>/state.json   (written atomically)
+               -> reports/<session>.html           (once there is an incident)
                                  |
     dashboard live page reads state.json every few seconds
 
@@ -86,6 +89,17 @@ the console) and skipped. It never stops the session. Measured on this laptop
 with tshark 4.6.9: a file cut short mid-packet is read without error and its
 complete packets are kept, so truncation loses at most the last half packet.
 
+CONTAINED (Step 19)
+-------------------
+Once there is an incident, every cycle - not just every closed minute -
+checks the newest traffic: has the named device made any connection to the
+new destinations of the report's section 4 (on the real lab: broker:4444)?
+When it has made none for 90 s, the phase becomes CONTAINED, with the time.
+If such a connection appears again, the phase goes back to INCIDENT. The
+engine never contains anything itself; it only confirms what the operator
+did. At STOP the session's capture files get a SHA-256 list
+(SHA256SUMS.txt in the session folder) for the report's "preserve" step.
+
 WHAT THIS FILE DOES NOT DO
 --------------------------
 It never contacts a device, a router or the broker, and never blocks
@@ -122,7 +136,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src import attribute, capture, detect, report, runs, windows
+from src import attribute, capture, detect, incident, report, runs, windows
 
 ROOT = capture.ROOT
 LIVE_DIR = ROOT / "pcap" / "live"
@@ -162,7 +176,7 @@ WAITING = "WAITING"           # no capture file yet
 LEARNING = "LEARNING"         # baseline still being recorded
 MONITORING = "MONITORING"     # baseline done, nothing abnormal
 INCIDENT = "INCIDENT"         # a device has gone sustainedly abnormal
-CONTAINED = "CONTAINED"       # reserved for Step 18 (the containment check)
+CONTAINED = "CONTAINED"       # incident, and the named device has stopped (Step 19)
 STOPPED = "STOPPED"           # capture over, final verdict written
 PHASES = [WAITING, LEARNING, MONITORING, INCIDENT, CONTAINED, STOPPED]
 
@@ -317,6 +331,8 @@ class LiveSession:
     reader            how to read one file into packets; by default
                       capture.read_packets with tshark. Tests pass their own.
     data_dir          where the finished run is saved
+    reports_dir       where reports/<session>.html is written (default: the
+                      "reports" folder beside data_dir, i.e. reports/)
     """
 
     def __init__(self, folder, baseline_seconds: float = DEFAULT_BASELINE,
@@ -325,12 +341,13 @@ class LiveSession:
                  window_seconds: int = windows.WINDOW_SECONDS,
                  grace_seconds: float = GRACE_SECONDS,
                  data_dir: Path = runs.DATA_DIR,
-                 reader=None):
+                 reader=None, reports_dir=None):
         self.folder = Path(folder)
         self.session = session or self.folder.name
         self.window_seconds = int(window_seconds)
         self.grace_seconds = float(grace_seconds)
         self.data_dir = Path(data_dir)
+        self.reports_dir = Path(reports_dir) if reports_dir else self.data_dir.parent / "reports"
 
         # The baseline must be whole minutes (windows.py refuses otherwise)
         # and long enough for the detector to judge anybody at all.
@@ -369,6 +386,11 @@ class LiveSession:
         self.detection = None
         self.result = None
         self.brief = None
+        self.incident = None                # the Step 19 report, a plain dict
+        self.containment = None             # the latest CONTAINED check
+        self.addresses: dict = {}           # device -> last IP seen (for the report)
+        self.evidence = None                # SHA-256 list of the files, at STOP
+        self.report_file = None             # reports/<session>.html once written
         self.analysis_seconds = None        # how long the last cycle took
 
         self.phase = WAITING
@@ -426,6 +448,7 @@ class LiveSession:
         if self.capture_start_epoch is None:
             self.capture_start_epoch = _first_epoch(packets)
         self.packets.extend(packets)
+        self.addresses = capture.addresses_from_packets(packets, self.addresses)
         if times:
             newest = max(times)
             self.last_epoch = newest if self.last_epoch is None else max(self.last_epoch, newest)
@@ -506,7 +529,60 @@ class LiveSession:
         if self.detection.onsets and self.first_alert is None:
             self._record_first_alert(now, final)
         self._record_verdict(now)
+        self._build_incident(now)
         self.analysis_seconds = time.perf_counter() - started
+
+    def _build_incident(self, now: float) -> None:
+        """
+        The Step 19 incident report, from this cycle's run/detection/result.
+        Presentation like the brief: a failure is recorded, never fatal.
+        """
+        self.incident = None
+        if not (self.detection and self.detection.onsets and self.result.ranking):
+            return
+        try:
+            self.incident = incident.build_incident(
+                self.run, self.detection, self.result,
+                capture_start_epoch=self.capture_start_epoch, now_seconds=now,
+                first_alert=self.first_alert, addresses=self.addresses,
+                evidence=self.evidence, session_folder=self._folder_text())
+        except Exception as exc:
+            self.incident = {"status": "failed", "error": str(exc)[:300]}
+
+    def _folder_text(self) -> str:
+        try:
+            return str(self.folder.resolve().relative_to(ROOT))
+        except ValueError:
+            return str(self.folder)
+
+    def _check_containment(self) -> None:
+        """
+        The CONTAINED check, on ALL the traffic read so far (the newest
+        packets matter here, not just the closed minutes): has the named
+        device stopped connecting to the report's new destinations for 90 s?
+        """
+        report_now = self.incident
+        if not report_now or report_now.get("status") in (None, "failed", "no incident"):
+            self.containment = None
+            return
+        where = report_now.get("where") or {}
+        patterns = (report_now.get("how") or {}).get("patterns") or []
+        alert = self.first_alert or {}
+        before = bool(self.containment and self.containment.get("contained"))
+        self.containment = incident.containment_status(
+            self.flows(), where.get("named"), patterns if where.get("named") else [],
+            self.now_seconds, self.capture_start_epoch, alert.get("raised_seconds"))
+        self.incident = incident.with_containment(report_now, self.containment)
+        if bool(self.containment.get("contained")) != before:
+            self._write_report()
+
+    def _write_report(self) -> None:
+        if not self.incident or self.incident.get("status") in ("failed", "no incident"):
+            return
+        try:
+            self.report_file = incident.write_html(json_safe(self.incident), self.reports_dir)
+        except OSError as exc:
+            print("  [live] could not write the report: %s" % exc, file=sys.stderr)
 
     def _record_first_alert(self, now: float, final: bool) -> None:
         """
@@ -514,15 +590,8 @@ class LiveSession:
         when the third abnormal minute (third ROW, as detect.find_onset counts
         them) of the first device to trip had closed.
         """
-        closed_at = None
-        first_device = None
-        for device, onset_w in self.detection.onset_windows.items():
-            scored = sorted(w for w in self.detection.scores[device] if w >= onset_w)
-            third = scored[min(detect.CONSECUTIVE, len(scored)) - 1]
-            moment = (third + 1) * self.window_seconds + self.grace_seconds
-            if closed_at is None or moment < closed_at or \
-                    (moment == closed_at and device < first_device):
-                closed_at, first_device = moment, device
+        first_device, closed_at = incident.alert_moment(self.detection, self.window_seconds,
+                                                        self.grace_seconds)
         start = self.capture_start_epoch
         self.first_alert = {
             "device": first_device,
@@ -574,6 +643,8 @@ class LiveSession:
         if self.closed_windows < self.baseline_windows:
             return LEARNING
         if self.first_alert is not None:
+            if self.containment and self.containment.get("contained"):
+                return CONTAINED
             return INCIDENT
         return MONITORING
 
@@ -594,6 +665,10 @@ class LiveSession:
                 self.closed_windows != self.analysed_windows:
             self._analyse(final=False)
             self.analysed_windows = self.closed_windows
+            self._check_containment()
+            self._write_report()
+        else:
+            self._check_containment()
         self._log_phase(self._decide_phase())
         self.cycles.append((self.now_seconds, self.phase))
         state = self.state()
@@ -613,8 +688,11 @@ class LiveSession:
         self.closed_windows = closed_window_count(self.now_seconds, self.window_seconds,
                                                   self.grace_seconds)
         if self.packets:
+            self._fingerprint_files()
             self._analyse(final=True)
             self.analysed_windows = self.closed_windows
+            self._check_containment()
+            self._write_report()
             if save:
                 self.save(force=force)
         self._log_phase(STOPPED)
@@ -622,6 +700,14 @@ class LiveSession:
         state = self.state()
         self.write()
         return state
+
+    def _fingerprint_files(self) -> None:
+        """SHA-256 of every capture file read, written beside them (preserve step)."""
+        try:
+            self.evidence = incident.write_checksums(self.folder, self.files_read)
+            self.evidence["folder"] = self._folder_text()
+        except OSError as exc:
+            print("  [live] could not write the SHA-256 list: %s" % exc, file=sys.stderr)
 
     def save(self, force: bool = False):
         """
@@ -643,6 +729,8 @@ class LiveSession:
             "problems": self.problems,
             "first_alert": self.first_alert,
             "grace_seconds": self.grace_seconds,
+            "containment": self.containment,
+            "evidence": self.evidence,
         }
         meta_file.write_text(json.dumps(json_safe(meta), indent=2), encoding="utf-8")
         self.saved = (parquet_file, meta_file)
@@ -726,10 +814,15 @@ class LiveSession:
             # because it (re)joined the network then (sent a DHCP broadcast).
             "rejoins": rejoins,
             "report": self.brief or {},
+            # Step 19: the complete incident report and the CONTAINED check.
+            "incident": self.incident,
+            "containment": self.containment,
+            "report_file": None if self.report_file is None else str(self.report_file),
+            "addresses": dict(self.addresses),
             "first_alert": self.first_alert,
             "first_alert_epoch": alert.get("raised_epoch"),
             "first_alert_closed_epoch": alert.get("closed_epoch"),
-            "contained_epoch": None,        # Step 18
+            "contained_epoch": (self.containment or {}).get("contained_epoch"),
             "verdict_changes": self.verdict_changes,
             "phase_log": self.phase_log,
             "problems": self.problems,

@@ -1,7 +1,7 @@
 {
  "session": "fixture_session",
  "phase": "MONITORING",
- "updated_epoch": 1794473445.2080765,
+ "updated_epoch": 1794488944.0303366,
  "capture_start_epoch": 1789379977.5977743,
  "now_seconds": 729.9461154937744,
  "now_epoch": 1789380707.5438898,
@@ -14,7 +14,7 @@
  "consecutive": 3,
  "files_read": 73,
  "packets": 4304,
- "flows": 432,
+ "flows": 420,
  "devices_seen": [
   "esp32-02",
   "esp32-03",
@@ -80,23 +80,23 @@
   "laptop-i3": {
    "kind": "laptop",
    "seen": true,
-   "latest_score": 1.6657045992698267,
+   "latest_score": 0.5058680696074463,
    "strikes": 0,
    "onset": null,
    "onset_epoch": null,
    "scores_by_window": {
     "0": 16.20369019817299,
     "1": 1.8011969145113622,
-    "2": 0.5291657063293564,
-    "3": 1.8011969145113622,
-    "4": 0.7075953634256993,
+    "2": 0.678272525785846,
+    "3": 1.8663582578655102,
+    "4": 0.421556724672872,
     "5": 2.048666232093066,
-    "6": 0.5058680696074463,
+    "6": 1.0079543729056417,
     "7": 1.8011969145113622,
-    "8": 15.455264861945718,
-    "9": 1.1046554059895934,
-    "10": 15.01087188855343,
-    "11": 1.6657045992698267
+    "8": 2.4084811084997115,
+    "9": 75.47345451105333,
+    "10": 2.4084811084997115,
+    "11": 0.5058680696074463
    },
    "skipped": false
   }
@@ -116,7 +116,18 @@
  "indicator_bonus": {},
  "explanations": {},
  "onset_windows": {},
+ "rejoins": {},
  "report": {},
+ "incident": null,
+ "containment": null,
+ "report_file": null,
+ "addresses": {
+  "esp32-03": "192.168.0.203",
+  "broker": "192.168.0.200",
+  "esp32-02": "192.168.0.160",
+  "laptop-i3": "192.168.0.218",
+  "router": "192.168.0.254"
+ },
  "first_alert": null,
  "first_alert_epoch": null,
  "first_alert_closed_epoch": null,
@@ -140,6 +151,6 @@
   }
  ],
  "problems": [],
- "analysis_seconds": 0.19190950004849583,
+ "analysis_seconds": 0.20873060007579625,
  "saved_run": null
 }
