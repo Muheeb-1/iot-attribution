@@ -1,0 +1,145 @@
+{
+ "session": "fixture_session",
+ "phase": "MONITORING",
+ "updated_epoch": 1794473445.2080765,
+ "capture_start_epoch": 1789379977.5977743,
+ "now_seconds": 729.9461154937744,
+ "now_epoch": 1789380707.5438898,
+ "baseline_seconds": 720,
+ "baseline_windows": 12,
+ "baseline_remaining_seconds": 0.0,
+ "window_seconds": 60,
+ "grace_seconds": 5.0,
+ "closed_windows": 12,
+ "consecutive": 3,
+ "files_read": 73,
+ "packets": 4304,
+ "flows": 432,
+ "devices_seen": [
+  "esp32-02",
+  "esp32-03",
+  "laptop-i3"
+ ],
+ "devices": {
+  "esp32-01": {
+   "kind": "sensor",
+   "seen": false,
+   "latest_score": null,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {},
+   "skipped": false
+  },
+  "esp32-02": {
+   "kind": "sensor",
+   "seen": true,
+   "latest_score": 0.0,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {
+    "0": 4.974937141614924,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0
+   },
+   "skipped": false
+  },
+  "esp32-03": {
+   "kind": "sensor",
+   "seen": true,
+   "latest_score": 0.0,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {
+    "0": 4.974937141614924,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0
+   },
+   "skipped": false
+  },
+  "laptop-i3": {
+   "kind": "laptop",
+   "seen": true,
+   "latest_score": 1.6657045992698267,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {
+    "0": 16.20369019817299,
+    "1": 1.8011969145113622,
+    "2": 0.5291657063293564,
+    "3": 1.8011969145113622,
+    "4": 0.7075953634256993,
+    "5": 2.048666232093066,
+    "6": 0.5058680696074463,
+    "7": 1.8011969145113622,
+    "8": 15.455264861945718,
+    "9": 1.1046554059895934,
+    "10": 15.01087188855343,
+    "11": 1.6657045992698267
+   },
+   "skipped": false
+  }
+ },
+ "threshold": 4.0,
+ "onsets": {},
+ "ranking": [],
+ "named": null,
+ "abstained": false,
+ "shortlist": [],
+ "confidence_percent": 0,
+ "path": [],
+ "edges": [],
+ "confidence": 0.0,
+ "scores": {},
+ "story_ranking": [],
+ "indicator_bonus": {},
+ "explanations": {},
+ "onset_windows": {},
+ "report": {},
+ "first_alert": null,
+ "first_alert_epoch": null,
+ "first_alert_closed_epoch": null,
+ "contained_epoch": null,
+ "verdict_changes": [],
+ "phase_log": [
+  {
+   "phase": "WAITING",
+   "seconds": null,
+   "epoch": null
+  },
+  {
+   "phase": "LEARNING",
+   "seconds": 9.404605388641357,
+   "epoch": 1789379987.0023797
+  },
+  {
+   "phase": "MONITORING",
+   "seconds": 729.9461154937744,
+   "epoch": 1789380707.5438898
+  }
+ ],
+ "problems": [],
+ "analysis_seconds": 0.19190950004849583,
+ "saved_run": null
+}

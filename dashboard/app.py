@@ -126,10 +126,14 @@ def path_edges(path) -> set:
 
 
 def network_figure(run: runs.Run, detection: detect.Detection,
-                   result: attribute.Attribution) -> go.Figure:
+                   result: attribute.Attribution, clock=report.clock) -> go.Figure:
     """
     The network as a picture: a dot per device, an arrow per link the analysis
     drew, and the attack path in red.
+
+    clock turns "seconds into the capture" into the text shown on hover. The
+    replay page shows the capture's own clock (00:16:00); the live page passes
+    a wall-clock version (14:32:05).
     """
     positions = circle_layout(run.device_names)
     on_path = path_edges(result.path)
@@ -179,7 +183,7 @@ def network_figure(run: runs.Run, detection: detect.Detection,
             hover.append(
                 "<b>%s</b><br>%s<br>%s" % (
                     device,
-                    "went abnormal at %s" % report.clock(onset) if onset is not None
+                    "went abnormal at %s" % clock(onset) if onset is not None
                     else "never flagged",
                     "rank %d of %d" % (rank, len(result.ranking)) if rank else "not ranked",
                 )
@@ -260,7 +264,8 @@ def timeline_figure(run: runs.Run, detection: detect.Detection,
     return figure
 
 
-def ranking_rows(result: attribute.Attribution, detection: detect.Detection) -> list:
+def ranking_rows(result: attribute.Attribution, detection: detect.Detection,
+                 clock=report.clock) -> list:
     """
     The ranking as plain rows, with each score scaled to a 0-1 bar.
 
@@ -279,7 +284,7 @@ def ranking_rows(result: attribute.Attribution, detection: detect.Detection) -> 
             "device": device,
             "score": score,
             "bar": max(0.0, min(1.0, score / top_score)),
-            "onset": report.clock(detection.onsets[device])
+            "onset": clock(detection.onsets[device])
             if device in detection.onsets else "-",
             "explanation": result.explain_rank(device),
             "shortlisted": device in result.shortlist,
@@ -325,23 +330,62 @@ def analyse(run_id: str):
     return run, detection, result, evidence
 
 
+# Who writes the brief. "template" contacts nothing and cannot fail; the two
+# models go through the evidence validator and fall back to the template.
+WRITERS = {
+    "template": "Plain template (nothing contacted)",
+    "local": "Local model - %s via Ollama" % report.DEFAULT_MODEL["local"],
+    "cloud": "Cloud model - %s" % report.DEFAULT_MODEL["cloud"],
+}
+
+
+def cloud_key_present() -> bool:
+    """Is the cloud key file there? Checked only to warn; it is never opened here."""
+    return (ROOT / report.API_KEY_FILE).exists() or Path(report.API_KEY_FILE).exists()
+
+
 @st.cache_data(show_spinner=False)
-def make_brief(run_id: str, offline: bool, nonce: int = 0):
+def make_brief(run_id: str, writer: str = "template", nonce: int = 0):
     """Produce the incident brief. Cached so it is not regenerated on every click."""
     run, detection, result, evidence = analyse(run_id)
     facts = report.allowed_facts_from(evidence, run)
-    outcome = report.generate_brief(evidence, facts, run, result, offline=offline)
-    return outcome
+    if writer == "template":
+        return report.generate_brief(evidence, facts, run, result, offline=True)
+    return report.generate_brief(evidence, facts, run, result, provider=writer)
 
 
 # --------------------------------------------------------------------------
 # The page
 # --------------------------------------------------------------------------
 
+def live_monitor_page() -> None:
+    """
+    The live page lives in dashboard/live_page.py. It is imported here, when
+    the page is opened, not at the top of the file: if anything in it were
+    broken, this replay page - the last rung of the fallback ladder - must
+    still open.
+    """
+    try:
+        from dashboard import live_page
+    except Exception as exc:                 # keep the replay page alive whatever happens
+        st.error("The live page could not be loaded: %s" % exc)
+        st.info("Use the replay page, or run  streamlit run dashboard/live_page.py")
+        return
+    live_page.render_page()
+
+
 def main() -> None:
     st.set_page_config(page_title="IoT Incident Attribution",
                        page_icon="🔎", layout="wide")
+    pages = st.navigation([
+        st.Page(replay_page, title="Replay a saved capture", icon="🔎",
+                url_path="replay", default=True),
+        st.Page(live_monitor_page, title="Live monitor", icon="📡", url_path="live"),
+    ])
+    pages.run()
 
+
+def replay_page() -> None:
     st.title("IoT Incident Attribution")
     st.caption("Which device did the attack start from - and what should be "
                "done about it?")
@@ -360,25 +404,31 @@ def main() -> None:
                               index=available.index("run_000")
                               if "run_000" in available else 0)
 
-        st.header("Demo safety")
-        replay = st.toggle(
-            "Replay mode", value=True,
-            help="Reads a capture already on disk and skips the language "
-                 "model. The full analysis still runs. Nothing needs to be "
-                 "connected.",
+        st.header("Who writes the brief")
+        writer = st.radio(
+            "Brief written by", list(WRITERS), format_func=WRITERS.get, index=0,
+            help="The analysis is identical whichever you pick. A model only "
+                 "rewords it, is checked against the evidence, and falls back "
+                 "to the template if it invents anything.",
         )
-        if replay:
-            st.success("Replay mode: nothing external is contacted.")
-        else:
+        replay = writer == "template"
+        if writer == "template":
+            st.success("Nothing external is contacted.")
+        elif writer == "local":
             if ollama_is_awake():
-                st.info("Live mode: the brief will be written by qwen3:4b.")
+                st.info("The brief will be written by %s." % report.DEFAULT_MODEL["local"])
             else:
-                st.warning("Live mode selected, but no model server answered "
-                           "on port 11434. The brief will fall back to the "
-                           "plain template.")
+                st.warning("No model server answered on port 11434. The brief "
+                           "will fall back to the plain template.")
+        elif not cloud_key_present():
+            st.warning("%s not found, so the cloud model cannot be called. The "
+                       "brief will fall back to the plain template." % report.API_KEY_FILE)
+        else:
+            st.info("The brief will be written by %s (needs internet)."
+                    % report.DEFAULT_MODEL["cloud"])
 
         if st.button("Rewrite the brief", disabled=replay,
-                     help="Ask the model again. Replay mode uses the template."):
+                     help="Ask the model again. The template never changes."):
             st.session_state["nonce"] = st.session_state.get("nonce", 0) + 1
 
         st.header("Demonstration")
@@ -483,18 +533,17 @@ def main() -> None:
     st.subheader("Incident brief")
 
     with st.spinner("Writing the brief..."):
-        outcome = make_brief(run_id, replay, st.session_state.get("nonce", 0))
+        outcome = make_brief(run_id, writer, st.session_state.get("nonce", 0))
     brief = outcome.brief
 
     if outcome.is_fallback:
         if replay:
-            st.info("**Plain template** - replay mode does not call the "
-                    "language model, so the brief is generated mechanically "
-                    "from the evidence.")
+            st.info("**Plain template** - no language model was asked, so "
+                    "the brief is generated mechanically from the evidence.")
         else:
-            st.warning("**LLM_FALLBACK** - the generated brief was rejected "
-                       "for containing something that is not in the evidence, "
-                       "twice. Showing the verified template instead.")
+            st.warning("**LLM_FALLBACK** - the model's brief could not be used "
+                       "(it did not answer, or twice wrote something that is "
+                       "not in the evidence). Showing the verified template instead.")
             with st.expander("Why it was rejected"):
                 for line in outcome.rejections:
                     st.write("- %s" % line)

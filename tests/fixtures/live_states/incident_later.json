@@ -1,0 +1,249 @@
+{
+ "session": "fixture_session",
+ "phase": "INCIDENT",
+ "updated_epoch": 1794473454.047367,
+ "capture_start_epoch": 1789379977.5977743,
+ "now_seconds": 1039.8223690986633,
+ "now_epoch": 1789381017.4201434,
+ "baseline_seconds": 720,
+ "baseline_windows": 12,
+ "baseline_remaining_seconds": 0.0,
+ "window_seconds": 60,
+ "grace_seconds": 5.0,
+ "closed_windows": 17,
+ "consecutive": 3,
+ "files_read": 104,
+ "packets": 6187,
+ "flows": 616,
+ "devices_seen": [
+  "esp32-02",
+  "esp32-03",
+  "laptop-i3"
+ ],
+ "devices": {
+  "esp32-01": {
+   "kind": "sensor",
+   "seen": false,
+   "latest_score": null,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {},
+   "skipped": false
+  },
+  "esp32-02": {
+   "kind": "sensor",
+   "seen": true,
+   "latest_score": 7.794228634059947,
+   "strikes": 3,
+   "onset": 780.0,
+   "onset_epoch": 1789380757.5977743,
+   "scores_by_window": {
+    "0": 4.974937141614924,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 3.247595264191645,
+    "13": 5.196152422706632,
+    "14": 5.196152422706632,
+    "15": 5.196152422706632,
+    "16": 7.794228634059947
+   },
+   "skipped": false
+  },
+  "esp32-03": {
+   "kind": "sensor",
+   "seen": true,
+   "latest_score": 0.0,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {
+    "0": 4.974937141614924,
+    "1": 0.0,
+    "2": 0.0,
+    "3": 0.0,
+    "4": 0.0,
+    "5": 0.0,
+    "6": 0.0,
+    "7": 0.0,
+    "8": 0.0,
+    "9": 0.0,
+    "10": 0.0,
+    "11": 0.0,
+    "12": 0.0,
+    "13": 0.0,
+    "14": 0.0,
+    "15": 0.0,
+    "16": 0.0
+   },
+   "skipped": false
+  },
+  "laptop-i3": {
+   "kind": "laptop",
+   "seen": true,
+   "latest_score": 15.435943051140887,
+   "strikes": 1,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {
+    "0": 21.971779589502976,
+    "1": 1.8011969145113622,
+    "2": 0.5291657063293564,
+    "3": 1.8011969145113622,
+    "4": 0.7075953634256993,
+    "5": 2.048666232093066,
+    "6": 0.5058680696074463,
+    "7": 1.8011969145113622,
+    "8": 15.455264861945718,
+    "9": 1.1046554059895934,
+    "10": 15.01087188855343,
+    "11": 1.6657045992698267,
+    "12": 15.050646654616244,
+    "13": 0.6825275290996652,
+    "14": 15.165399762979765,
+    "15": 0.6323350870093081,
+    "16": 15.435943051140887
+   },
+   "skipped": false
+  }
+ },
+ "threshold": 4.0,
+ "onsets": {
+  "esp32-02": 780.0
+ },
+ "ranking": [
+  "esp32-02"
+ ],
+ "named": "esp32-02",
+ "abstained": false,
+ "shortlist": [
+  "esp32-02"
+ ],
+ "confidence_percent": 100,
+ "path": [
+  "esp32-02"
+ ],
+ "edges": [],
+ "confidence": 1.0,
+ "scores": {
+  "esp32-02": 0.5944492131616596
+ },
+ "story_ranking": [
+  "esp32-02"
+ ],
+ "indicator_bonus": {},
+ "explanations": {
+  "esp32-02": "story rank 1 (not re-ranked)"
+ },
+ "onset_windows": {
+  "esp32-02": 13
+ },
+ "report": {
+  "source": "template",
+  "brief": {
+   "headline": "A network intrusion was detected. It appears to have started on esp32-02 and spread to other devices.",
+   "origin": {
+    "device": "esp32-02",
+    "confidence": 100,
+    "label": "high"
+   },
+   "timeline": [
+    {
+     "time": "00:13:00",
+     "device": "esp32-02",
+     "what_happened": "esp32-02 began behaving differently from its normal pattern.",
+     "evidence_ids": [
+      "C000468",
+      "C000486"
+     ]
+    }
+   ],
+   "affected_devices": [
+    "esp32-02"
+   ],
+   "actions": [
+    {
+     "order": 1,
+     "action": "Disconnect esp32-02 from the network.",
+     "why": "It is the most likely starting point, so isolating it first stops the spread.",
+     "urgency": "now"
+    },
+    {
+     "order": 2,
+     "action": "Check the other devices listed as affected.",
+     "why": "They may already be compromised and acting on instructions.",
+     "urgency": "today"
+    },
+    {
+     "order": 3,
+     "action": "Change the passwords and keys used by these devices.",
+     "why": "Any credentials on a compromised device should be assumed known.",
+     "urgency": "this week"
+    }
+   ],
+   "uncertainty": "Confidence in the starting device is 100% (high). Devices that only received traffic may not appear here, because this analysis sees devices by what they send."
+  }
+ },
+ "first_alert": {
+  "device": "esp32-02",
+  "onset_seconds": 780.0,
+  "closed_seconds": 965.0,
+  "raised_seconds": 969.9052772521973,
+  "closed_epoch": 1789380942.5977743,
+  "raised_epoch": 1789380947.5030515,
+  "found_at_stop": false
+ },
+ "first_alert_epoch": 1789380947.5030515,
+ "first_alert_closed_epoch": 1789380942.5977743,
+ "contained_epoch": null,
+ "verdict_changes": [
+  {
+   "seconds": 969.9052772521973,
+   "epoch": 1789380947.5030515,
+   "named": "esp32-02",
+   "abstained": false,
+   "confidence_percent": 100,
+   "ranking": [
+    "esp32-02"
+   ],
+   "onsets": {
+    "esp32-02": 780.0
+   },
+   "final": false
+  }
+ ],
+ "phase_log": [
+  {
+   "phase": "WAITING",
+   "seconds": null,
+   "epoch": null
+  },
+  {
+   "phase": "LEARNING",
+   "seconds": 9.404605388641357,
+   "epoch": 1789379987.0023797
+  },
+  {
+   "phase": "MONITORING",
+   "seconds": 729.9461154937744,
+   "epoch": 1789380707.5438898
+  },
+  {
+   "phase": "INCIDENT",
+   "seconds": 969.9052772521973,
+   "epoch": 1789380947.5030515
+  }
+ ],
+ "problems": [],
+ "analysis_seconds": 0.20348590007051826,
+ "saved_run": null
+}

@@ -1,0 +1,92 @@
+{
+ "session": "fixture_session",
+ "phase": "WAITING",
+ "updated_epoch": 1794473454.478396,
+ "capture_start_epoch": null,
+ "now_seconds": null,
+ "now_epoch": null,
+ "baseline_seconds": 720,
+ "baseline_windows": 12,
+ "baseline_remaining_seconds": null,
+ "window_seconds": 60,
+ "grace_seconds": 5.0,
+ "closed_windows": 0,
+ "consecutive": 3,
+ "files_read": 0,
+ "packets": 0,
+ "flows": 0,
+ "devices_seen": [],
+ "devices": {
+  "esp32-01": {
+   "kind": "sensor",
+   "seen": false,
+   "latest_score": null,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {},
+   "skipped": false
+  },
+  "esp32-02": {
+   "kind": "sensor",
+   "seen": false,
+   "latest_score": null,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {},
+   "skipped": false
+  },
+  "esp32-03": {
+   "kind": "sensor",
+   "seen": false,
+   "latest_score": null,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {},
+   "skipped": false
+  },
+  "laptop-i3": {
+   "kind": "laptop",
+   "seen": false,
+   "latest_score": null,
+   "strikes": 0,
+   "onset": null,
+   "onset_epoch": null,
+   "scores_by_window": {},
+   "skipped": false
+  }
+ },
+ "threshold": 4.0,
+ "onsets": {},
+ "ranking": [],
+ "named": null,
+ "abstained": false,
+ "shortlist": [],
+ "confidence_percent": null,
+ "path": [],
+ "edges": [],
+ "confidence": null,
+ "scores": {},
+ "story_ranking": [],
+ "indicator_bonus": {},
+ "explanations": {},
+ "onset_windows": {},
+ "report": {},
+ "first_alert": null,
+ "first_alert_epoch": null,
+ "first_alert_closed_epoch": null,
+ "contained_epoch": null,
+ "verdict_changes": [],
+ "phase_log": [
+  {
+   "phase": "WAITING",
+   "seconds": null,
+   "epoch": null
+  }
+ ],
+ "problems": [],
+ "analysis_seconds": null,
+ "saved_run": null
+}

@@ -707,6 +707,16 @@ class LiveSession:
             "confidence_percent": res.confidence_percent if res is not None else None,
             "path": list(res.path) if res is not None else [],
             "edges": res.edge_evidence() if res is not None else [],
+            # What the page needs to rebuild the ranking display exactly as
+            # the replay page draws it (dashboard/live_page.objects_from_state).
+            # Copied from the result, never recomputed.
+            "confidence": float(res.confidence) if res is not None else None,
+            "scores": dict(res.scores) if res is not None else {},
+            "story_ranking": list(res.story_ranking) if res is not None else [],
+            "indicator_bonus": dict(res.indicator_bonus) if res is not None else {},
+            "explanations": {d: res.explain_rank(d) for d in res.ranking}
+            if res is not None else {},
+            "onset_windows": dict(det.onset_windows) if det is not None else {},
             "report": self.brief or {},
             "first_alert": self.first_alert,
             "first_alert_epoch": alert.get("raised_epoch"),
