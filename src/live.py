@@ -130,6 +130,7 @@ LIVE_DIR = ROOT / "pcap" / "live"
 STATE_FILE = "state.json"
 STOP_FILE = "STOP"
 REPLAY_SOURCE = "replay_source"     # where --replay keeps the cut-up capture
+CAPTURE_MARKER = "CAPTURING"        # written by src/live_capture.py while it records
 
 # A minute is "closed" this long after its end. Packets are timestamped when
 # the adapter sees them, and the last few of a minute can land in the next
@@ -795,17 +796,44 @@ def split_capture(pcap_path, out_dir, seconds: int = SEGMENT_SECONDS,
     return ring_files(out_dir)
 
 
-def _prepare_folder(folder: Path, force: bool) -> None:
-    """A session folder must start empty of capture files and old state."""
+def capture_is_recording(folder: Path) -> bool:
+    """
+    Is src/live_capture.py recording into this folder right now? It leaves a
+    CAPTURING marker there while dumpcap runs and removes it when it stops
+    (writing STOP instead). A marker left behind by a capture window that was
+    simply closed looks the same - which is harmless: the engine joins, reads
+    every file, and stops by itself 30 s after the last one.
+    """
+    folder = Path(folder)
+    return (folder / CAPTURE_MARKER).exists() and not (folder / STOP_FILE).exists()
+
+
+def _prepare_folder(folder: Path, force: bool, join: bool = False) -> bool:
+    """
+    A session folder must start empty of capture files and old state - with
+    one exception. If join is allowed and a capture of this session is
+    recording right now (the engine was started second, or restarted in the
+    middle of a session), the engine JOINS it: nothing is deleted and every
+    file is read from the first one, so the answer is the same as if the
+    engine had been running all along. Joining wins even over --force,
+    because deleting the files of a running capture would destroy the session.
+    Returns True when it joined.
+    """
     folder.mkdir(parents=True, exist_ok=True)
+    if join and capture_is_recording(folder):
+        return True
     leftovers = ring_files(folder) + [p for p in (folder / STATE_FILE, folder / STOP_FILE)
                                       if p.exists()]
     if leftovers and not force:
         raise FileExistsError(
-            "%s already holds %d file(s) from an earlier session. Pick a new\n"
-            "  --session name, or pass --force to clear it." % (folder, len(leftovers)))
+            "%s already holds %d file(s) from an earlier session, and no capture is\n"
+            "  recording into it now. Pick a new --session name, or pass --force to\n"
+            "  clear it. To look at a finished session again, replay its merged file:\n"
+            "  python -m src.live --session <new name> --replay pcap\\live\\%s.pcapng"
+            % (folder, len(leftovers), folder.name))
     for p in leftovers:
         p.unlink()
+    return False
 
 
 def replay(pcap_path, session: str, folder=None, baseline_seconds: float = DEFAULT_BASELINE,
@@ -870,20 +898,25 @@ def run_live(session: str, folder=None, baseline_seconds: float = DEFAULT_BASELI
     Watch the session folder until STOP, Ctrl+C, or 30 s with no new file.
     """
     folder = Path(folder) if folder else LIVE_DIR / session
-    _prepare_folder(folder, force)
     if not force and runs.data_path(session, data_dir).exists():
         raise FileExistsError("data/%s.parquet already exists; pick a new --session "
                               "or pass --force" % session)
+    joined = _prepare_folder(folder, force, join=True)
 
     live = LiveSession(folder, baseline_seconds=baseline_seconds, session=session,
                        tshark=tshark, data_dir=data_dir)
     live.write()
     print("\n  watching %s" % folder)
-    print("  start the capture in an Administrator PowerShell:")
-    print("    python -m src.live_capture --session %s   (Step 16b), or" % session)
-    print("    dumpcap -i <wired adapter> -b duration:%d -w \"%s\"\n"
-          % (SEGMENT_SECONDS, folder / "ring.pcapng"))
-    print("  stop with Ctrl+C here, or create a file named STOP in that folder.\n")
+    if joined:
+        print("  a capture is already recording here - joining it and reading every "
+              "file from the first.")
+    else:
+        print("  start the capture in an Administrator PowerShell:")
+        print("    python -m src.live_capture --session %s" % session)
+        print("  (or Wireshark's window: a new file every %d s into \"%s\")"
+              % (SEGMENT_SECONDS, folder / "ring.pcapng"))
+    print("\n  stop with Ctrl+C in the CAPTURE window (this one then finishes by itself),")
+    print("  or Ctrl+C here, or create a file named STOP in that folder.\n")
 
     last_count, last_change = 0, time.monotonic()
     last_print = None
