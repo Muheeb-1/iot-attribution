@@ -99,6 +99,7 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 
 from src import features, runs, windows
+from src.capture import BROADCAST_NAME
 
 # How diagnostic each feature is of an actual compromise, rather than merely
 # of an unusual day. See the docstring above for the reasoning.
@@ -123,6 +124,31 @@ MIN_BASELINE_WINDOWS = 8   # too little history to judge a device at all
 ISO_TREES = 50
 ISO_WEIGHT = 1.5           # how loudly the second opinion is allowed to speak
 
+# STEP 18, CHANGE C3 - a minute in which a device (re)joined the network is not
+# "normal" for it.
+#
+# What happened in rehearsal_01: 11 minutes into the baseline esp32-02 dropped
+# off the Wi-Fi and came back (ARP retries, a DHCP broadcast at +695 s, a new
+# MQTT session). That one baseline minute had 6 connections instead of the
+# usual 2-3, which widened the board's idea of how much it normally varies -
+# and the attack minutes (3 connections, one of them to port 4444) then scored
+# only 2.4 against a line of 4.0. The attack was missed because one odd minute
+# was allowed to define normal.
+#
+# The rule: a baseline minute in which a device sent a DHCP broadcast (to
+# "broadcast", destination port 67 - the "I need an address" message every
+# device sends when it joins or rejoins the network) is left out of THAT
+# device's baseline. The minute is still scored and drawn; it just does not
+# teach the detector what normal is. Nothing else is left out, and the
+# baseline that remains must still hold MIN_BASELINE_WINDOWS minutes, or the
+# device is skipped as before. DHCP RENEWALS go straight to the router, not
+# to broadcast, so a device that merely renews its lease is not affected.
+#
+# A switch, default ON; set False (or evaluate.py --rules old) for the old rule.
+# Simulated runs contain no "broadcast" destination, so they are unaffected.
+SKIP_REJOIN_MINUTES = True
+DHCP_SERVER_PORT = 67
+
 
 @dataclass
 class Detection:
@@ -132,6 +158,9 @@ class Detection:
     onsets: dict = field(default_factory=dict)         # dev -> seconds
     onset_windows: dict = field(default_factory=dict)  # dev -> window number
     skipped: list = field(default_factory=list)        # devices with too little history
+    # dev -> {window: seconds of its first DHCP broadcast in that window}:
+    # the baseline minutes left out of that device's normal (Step 18, C3).
+    rejoins: dict = field(default_factory=dict)
     threshold: float = THRESHOLD
     consecutive: int = CONSECUTIVE
     window_seconds: int = windows.WINDOW_SECONDS
@@ -151,18 +180,73 @@ class Detection:
         )
 
 
+def rejoin_minutes(
+    connections: pd.DataFrame,
+    device_names,
+    baseline_windows: int,
+    window_seconds: int = windows.WINDOW_SECONDS,
+) -> dict:
+    """
+    The baseline minutes in which each device (re)joined the network.
+
+    Returns dev -> {window: seconds}, where seconds is the time of the device's
+    first DHCP broadcast (dst "broadcast", dport 67) in that window. Only
+    baseline windows are listed and only devices in device_names. A device
+    that never sent one is absent. Read from the flow table - the same one
+    features.py reads - so it needs no extra input and works the same on a
+    saved run, a live session and a simulated run (which has none).
+    """
+    needed = {"t", "src", "dst", "dport"}
+    if connections is None or len(connections) == 0 or not needed <= set(connections.columns):
+        return {}
+    lab = set(device_names)
+    asks = connections[
+        (connections["dst"] == BROADCAST_NAME)
+        & (connections["dport"] == DHCP_SERVER_PORT)
+        & (connections["src"].isin(lab))
+    ]
+    if asks.empty:
+        return {}
+    asks = asks.assign(w=windows.window_of(asks["t"], window_seconds))
+    asks = asks[asks["w"] < baseline_windows]
+    out: dict = {}
+    for (dev, w), group in asks.groupby(["src", "w"], sort=True):
+        out.setdefault(dev, {})[int(w)] = float(group["t"].min())
+    return out
+
+
+def rejoins_for_run(run: runs.Run, enabled: bool | None = None) -> dict:
+    """
+    rejoin_minutes for a loaded run, if the Step 18 switch is ON (read at call
+    time, so evaluate.py can score the old rule by turning it off); {} if OFF.
+    """
+    if enabled is None:
+        enabled = SKIP_REJOIN_MINUTES
+    if not enabled:
+        return {}
+    return rejoin_minutes(run.connections, run.device_names, run.baseline_windows,
+                          run.window_seconds)
+
+
 def robust_scores(
     device_table: pd.DataFrame,
     baseline_windows: int,
     weighted: bool = True,
+    left_out=(),
 ) -> np.ndarray:
     """
     Score every window for ONE device against its own baseline.
 
     device_table must be sorted by window and contain the seven feature
-    columns. Returns one score per row, in the same order.
+    columns. Returns one score per row, in the same order. left_out lists
+    baseline windows that must not count as normal (Step 18, C3): they are
+    still scored, but are not used to learn the median, the spread or the
+    forest.
     """
-    baseline = device_table[device_table["w"] < baseline_windows]
+    in_baseline = (device_table["w"] < baseline_windows).values
+    if len(left_out):
+        in_baseline = in_baseline & ~device_table["w"].isin(list(left_out)).values
+    baseline = device_table[in_baseline]
     columns = features.FEATURE_COLUMNS
 
     # What this device usually does.
@@ -199,9 +283,11 @@ def robust_scores(
         forest.fit(baseline[columns])
         outlier = -forest.score_samples(device_table[columns])
         # Put it on the same footing as the z-score by expressing it relative
-        # to how it behaved during the baseline.
-        n = len(baseline)
-        outlier = (outlier - outlier[:n].mean()) / (outlier[:n].std() + 1e-9)
+        # to how it behaved during the baseline. (The baseline rows are picked
+        # by the same mask as above; with nothing left out they are simply the
+        # first rows of the sorted table, exactly as before Step 18.)
+        learned = outlier[in_baseline]
+        outlier = (outlier - learned.mean()) / (learned.std() + 1e-9)
         score = np.maximum(score, outlier * ISO_WEIGHT)
     except Exception:
         # If the forest cannot be fitted (too few or degenerate baseline rows)
@@ -255,6 +341,7 @@ def detect(
     consecutive: int = CONSECUTIVE,
     window_seconds: int = windows.WINDOW_SECONDS,
     min_baseline_windows: int = MIN_BASELINE_WINDOWS,
+    rejoins: dict | None = None,
 ) -> Detection:
     """
     Score every device against its own baseline and find when each went bad.
@@ -262,22 +349,31 @@ def detect(
     weighted=True is the V5 detector (features weighted by DIAG).
     weighted=False is the plain version, kept so evaluate.py can show what the
     weighting is worth rather than merely asserting it.
+
+    rejoins (from rejoin_minutes) names, per device, the baseline minutes to
+    leave out of its normal. None or {} leaves nothing out - the old rule.
+    detect_run fills it in from the run when SKIP_REJOIN_MINUTES is ON.
     """
+    rejoins = {dev: dict(ws) for dev, ws in (rejoins or {}).items()}
     result = Detection(
-        threshold=threshold, consecutive=consecutive, window_seconds=window_seconds
+        threshold=threshold, consecutive=consecutive, window_seconds=window_seconds,
+        rejoins=rejoins,
     )
 
     for device, group in feature_table.groupby("dev"):
         group = group.sort_values("w")
-        baseline = group[group["w"] < baseline_windows]
+        left_out = sorted(rejoins.get(device, {}))
+        baseline = group[(group["w"] < baseline_windows) & ~group["w"].isin(left_out)]
 
         if len(baseline) < min_baseline_windows:
             # We have not watched this device long enough to know what normal
-            # is. Saying nothing is honest; guessing would not be.
+            # is. Saying nothing is honest; guessing would not be. (Minutes
+            # left out because the device was rejoining do not count.)
             result.skipped.append(device)
             continue
 
-        scores = robust_scores(group, baseline_windows, weighted=weighted)
+        scores = robust_scores(group, baseline_windows, weighted=weighted,
+                               left_out=left_out)
         window_numbers = group["w"].values
 
         result.scores[device] = dict(
@@ -297,8 +393,14 @@ def detect(
 
 
 def detect_run(run: runs.Run, weighted: bool = True, **kwargs) -> Detection:
-    """Convenience: features and detection in one call, for a loaded run."""
+    """
+    Convenience: features and detection in one call, for a loaded run. The
+    rejoin minutes are worked out from the run's own traffic when the Step 18
+    switch is ON (pass rejoins=... to override).
+    """
     table = features.features_for_run(run)
+    if "rejoins" not in kwargs:
+        kwargs["rejoins"] = rejoins_for_run(run)
     return detect(
         table,
         baseline_windows=run.baseline_windows,

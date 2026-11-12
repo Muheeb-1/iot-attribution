@@ -361,13 +361,19 @@ def test_live_final_verdict_equals_the_offline_pipeline(replays, run_id):
     assert s.result.path == offline.path
 
     # The saved live session is the same flow table as the offline conversion,
-    # and as the run the published table was scored from, when it is on disk.
+    # and as the run the published table was scored from, when it is on disk
+    # AND was converted under the same naming rule. The published runs predate
+    # Step 18 (old multicast rule); that they still reproduce exactly under the
+    # old rule is checked in tests/test_step18.py.
     saved = runs.load_run(run_id, r["data_dir"])
     pd.testing.assert_frame_equal(saved.connections, r["run"].connections)
     assert saved.baseline_seconds == 720
     published = runs.data_path(run_id)
     if published.exists():
-        pd.testing.assert_frame_equal(saved.connections, pd.read_parquet(published))
+        published_meta = json.loads(runs.meta_path(run_id).read_text(encoding="utf-8"))
+        if bool(published_meta.get("multicast_as_broadcast", False)) == \
+                capture.MULTICAST_AS_BROADCAST:
+            pd.testing.assert_frame_equal(saved.connections, pd.read_parquet(published))
 
 
 @needs_segments

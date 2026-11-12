@@ -1,8 +1,13 @@
 # Final phase: live attribution - the plan
 
-Version 2, 11 Nov 2026. Audit done 26 Oct against commit ee805cd (Step 14); decisions taken
+Version 3, 12 Nov 2026. Audit done 26 Oct against commit ee805cd (Step 14); decisions taken
 11 Nov. **Status: approved - build it.** Deadline: everything working and rehearsed by
 **Saturday 14 Nov, end of day**. No new features on Saturday; Saturday is for rehearsal.
+
+Changed in version 3 (12 Nov): the first hardware rehearsal (rehearsal_01) failed - the
+alert named laptop-i3 and the attacked board was never flagged. The fix became **Step 18**
+and was done first; the incident report moved to Step 19; the old Step 19 (multicast fix)
+is now part of Step 18 (change C1). Measured before/after: section 7, "12 Nov".
 
 ## 1. The goal in one paragraph
 
@@ -19,9 +24,9 @@ as an ordinary run, so the existing replay dashboard and `evaluate.py` can open 
 1. **Containment is recommend-only.** The report tells the operator exactly what to do; the
    operator does it by hand (pull the board's power, or block its MAC on the router). The
    engine then CONFIRMS containment by watching the traffic. No button executes anything.
-2. **The multicast fix goes in, measured and reported both ways** (Step 19).
+2. **The multicast fix goes in, measured and reported both ways** (Step 18, change C1).
 3. **One incident report, everything in one place**, built deterministically from the
-   evidence so it cannot fail in a demo; LLM wording is optional polish on top (Step 18).
+   evidence so it cannot fail in a demo; LLM wording is optional polish on top (Step 19).
 4. **Fallback ladder - the demo must never depend on an untested part:**
    live capture -> if it misbehaves, the same live page driven by `--replay` of a recorded
    capture -> if the page misbehaves, the existing replay dashboard. Each rung is kept
@@ -127,10 +132,36 @@ If a step is not green by its day's end, stop and tell Muheeb - do not stack wor
 - Tests: plain-function tests plus a Streamlit AppTest rendering every phase from a
   fixture state.json with zero exceptions.
 - End of day: first full live rehearsal on hardware (capture -> engine -> page -> attack).
+  **Done 12 Nov as rehearsal_01 - it failed** (laptop-i3 named; esp32-02 never flagged).
+
+**Step 18 - the rehearsal_01 fixes (done 12 Nov, before anything else)**
+Root cause, analysed on `pcap/live/rehearsal_01.pcapng` with its answer file:
+(1) esp32-02 dropped off and rejoined the network at +660..+702 s (ARP retries, a DHCP
+broadcast at +695 s, a new MQTT session), inside baseline minute 11; that minute
+(6 connections) inflated its baseline spread, so the attack minutes (3 connections incl.
+port 4444) scored 2.4 < 4.0. (2) laptop-i3 was flagged by a flip-flop: minutes with only
+its 2-second loop read iat_reg ~19, minutes with broadcast/multicast chatter ~2-5; and
+multicast addresses counted as extra destinations. Three changes, each a module switch,
+default ON, so the old rule can still be scored (`python -m src.evaluate --rules old`):
+- **C1** `capture.MULTICAST_AS_BROADCAST`: IPv4/IPv6 multicast and 255.255.255.255 are
+  named "broadcast" (the `endpoint_name` bug). Acts at conversion, so scoring it needs
+  `--pcap-dir` (re-convert from the raw captures; the saved runs are never overwritten).
+- **C2** `features.IAT_IGNORES_BROADCAST`: iat_reg is computed only over the device's
+  connections whose destination is not "broadcast". The other six features unchanged.
+- **C3** `detect.SKIP_REJOIN_MINUTES`: a baseline minute in which a device sent a DHCP
+  broadcast (dst "broadcast", dport 67) is left out of THAT device's baseline.
+  MIN_BASELINE_WINDOWS (8) is kept and counts only the minutes actually used. The minutes
+  left out are in `state.json` ("rejoins") and on the live page: "<device> rejoined the
+  network at HH:MM:SS; that minute is not used as normal".
+- Results, both ways (none overwritten): `results/table_live.csv` stays the old rule;
+  `results/table_live_fixed.csv`, `results/table_rehearsal_old.csv` /
+  `table_rehearsal_fixed.csv`, `results/false_alarms_old.csv` / `false_alarms_fixed.csv`.
+- Tests: `tests/test_step18.py` (unit tests per change; acceptance on rehearsal_01, the 12
+  segments and the 24 attack-free sessions, skipping when the pcaps are absent).
 
 ### Friday 13 Nov
 
-**Step 18 - the incident report (the centrepiece)**
+**Step 19 - the incident report (the centrepiece)**
 One function builds a plain dict from run + detection + attribution; the page renders it
 and writes `reports/<session>.html` (self-contained, print-to-PDF from the browser, plus a
 download button). No new dependency. Sections:
@@ -158,23 +189,15 @@ download button). No new dependency. Sections:
   page labels it "offline / contained", not "attacking".
 - LLM wording is optional: if used, it goes through the existing validator and falls back
   to the deterministic text. The report must be complete with the LLM switched off.
-
-**Step 19 - the multicast fix, measured**
-- The bug: `capture.endpoint_name` means to name multicast traffic "broadcast" (see its own
-  comment), but that check sits after `if ip: return ip`, so it never fires for IP packets.
-  Windows name lookups from laptop-i3 (LLMNR, UDP 5355 to 224.0.0.252 / ff02::1:3) were
-  therefore counted as "new outside addresses" - the cause of the one wrong verdict
-  (live_batch_05) and of the confidence drop in live_batch_04.
-- Add a switch (default ON) that names IPv4/IPv6 multicast and 255.255.255.255 "broadcast".
-- Report both ways, never overwrite: `results/table_live.csv` stays as the original rule
-  (11/12); add `results/table_live_multicast.csv` (expected 12/12), both reproducible from
-  `pcap/segments/`. The README states that the fix was found by studying these captures and
-  that the fresh sessions of Step 20 are its independent test.
-- Simulated runs contain no multicast addresses, so table1.csv must not move - confirm it.
+- (The old "Step 19 - the multicast fix, measured" is now Step 18, change C1. Its table is
+  `results/table_live_fixed.csv`, not `table_live_multicast.csv`. The README must still say
+  that C1 was found by studying the 12 captures, C2/C3 by studying rehearsal_01, and that
+  the fresh sessions of Step 20 are their independent test.)
 
 ### Saturday 14 Nov
 
 **Step 20 - fresh sessions on the real lab (minimum 3, target 6)**
+- First: `rehearsal_02` with `--origin esp32-03` (the first session under the Step 18 rules).
 - Alternate esp32-02 / esp32-03, laptop-i3 loop running, sleep disabled. Each: start
   capture + engine, wait for MONITORING, `python -m src.scenario --run live_session_NN`,
   wait for the alert, contain by hand, wait for CONTAINED, stop.
@@ -189,13 +212,26 @@ download button). No new dependency. Sections:
   alert take about four minutes" (section 7).
 - Two full dress rehearsals, then freeze. No code changes after the freeze.
 
+### Later - recorded, NOT started (ask Muheeb before starting either)
+
+**Step 22 - a realistic beacon payload (the guide's request)**
+- Replace the ~200-byte test beacon with a payload that looks like real command-and-control
+  traffic, of about the same size, so the measured byte counts and the 30-s rhythm stay
+  comparable. Needs re-flashing both boards (`firmware/sensor/sensor.ino`) - do it together
+  with the deferred Wi-Fi-credentials change, after the demo. Re-measure: the 12-capture
+  numbers will not transfer automatically.
+
+**Step 23 - a visual redesign of the dashboard**
+- Layout, colours and typography of the replay and live pages. Presentation only: no change
+  to what is computed or shown as evidence; the AppTest render tests must stay green.
+
 ## 6. state.json (minimum fields)
 
 `session, phase, updated_epoch, capture_start_epoch, now_seconds, baseline_seconds,
 baseline_remaining_seconds, packets, flows, devices{name: {latest_score, strikes, onset,
 scores_by_window}}, threshold, onsets, ranking, named, abstained, confidence_percent, path,
-edges, report{...section 5 Step 18...}, first_alert_epoch, contained_epoch,
-verdict_changes[...]`
+edges, report{...section 5 Step 19...}, first_alert_epoch, contained_epoch,
+verdict_changes[...], rejoins{name: [{window, seconds, epoch}]} (Step 18)`
 
 ## 7. Evidence that this works (measured, not assumed)
 
@@ -233,7 +269,46 @@ verdict_changes[...]`
   connect/disconnect loop looks perfectly regular (iat_reg ~19 against a baseline of ~4).
 - Tested and rejected: leaving broadcast flows out of the per-minute measurements. The
   boards then have too little baseline traffic to be judged and the attack is not
-  detected at all (0/12). Do not try it.
+  detected at all (0/12). Do not try it. (Step 18's C2 is narrower: it leaves broadcast
+  out of iat_reg ONLY; the other six measurements still count it.)
+
+12 Nov, Step 18 - the rehearsal_01 fixes, measured both ways (old = all three switches
+OFF, new = all ON; the 12 captures and rehearsal_01 re-converted from the raw pcaps):
+
+| set | old rule | new rule |
+|---|---|---|
+| simulated `results/table1.csv` | - | byte-identical (no broadcast in simulated runs) |
+| live batch, 12 real attacks: V5 top-1 | 11/12 (`table_live.csv`) | 12/12, all at 100% (`table_live_fixed.csv`) |
+| live batch: laptop-i3 flagged | 2 of 12 | 0 of 12 |
+| rehearsal_01: verdict | laptop-i3 named, esp32-02 never flagged | esp32-02 named, 100% |
+| rehearsal_01 replayed live: alert | 665 s after the attack, wrong device | 185 s after the attack (esp32-02) |
+| attack-free: 24 sessions of 25 min, 12-min baseline | 1 false alarm (laptop-i3, baseline2 #7) | 0 |
+
+- Reproduce: `python -m src.evaluate --rules old|new --prefix live_batch --runs 12
+  --pcap-dir pcap/segments`, the same with `--prefix rehearsal --runs 1 --pcap-dir pcap/live`,
+  and `python -m src.evaluate --rules old|new --false-alarms pcap/baseline.pcapng
+  pcap/baseline2.pcapng`. `--rules old` reproduces `table_live.csv` byte-for-byte, from the
+  saved runs and from the raw captures alike.
+- Each change alone and in pairs (C1 C2 C3; batch correct / laptop flagged in batch /
+  rehearsal_01 correct / false alarms in 24): 000 11/2/no/1; 100 12/0/no/0; 010 4/9/no/1;
+  001 10/3/yes/1; 110 12/0/no/0; 101 12/1/yes/0; 011 5/8/yes/1; **111 12/0/yes/0**.
+  Only all three together fix everything; C2 without C1 is much worse (the multicast
+  addresses then still count as destinations and the laptop's timing reads regular).
+- rehearsal_01 alert after 185 s, not 229-230 s: the trigger landed 0.2 s before a minute
+  boundary, so the first attack minute was already abnormal (180 s + 5 s grace).
+- **Caveat 1 - the laptop's DHCP messages.** C3 also catches laptop-i3: Windows sends a
+  DHCP INFORM broadcast (type 8 - "send me network settings", not a rejoin) in 2-4 of its
+  12 baseline minutes in every session. The flow table has no DHCP message type, so the
+  rule cannot tell INFORM from a real join (esp32-02 sent DISCOVER/REQUEST, types 1/3).
+  Effect: those laptop minutes are left out too, and the live page says "laptop-i3
+  rejoined the network" for them, which is not literally true.
+- **Caveat 2 - a device can drop below the 8-minute minimum.** In the attack-free set,
+  laptop-i3 had fewer than 8 usable baseline minutes in 7 of the 10 baseline2 sessions
+  it was in (old rule: 2), so it was not judged there - "0 false alarms" includes those.
+  The one old false alarm (baseline2 session 7) is fixed with the laptop really judged
+  (9 minutes used). In the 12 attacks and rehearsal_01 the laptop is judged every time.
+- The fixes were found on the captures they improve (C1 on the 12, C2/C3 on rehearsal_01).
+  rehearsal_02 onwards (Step 20) is the independent check.
 
 Not testable off the laptop: live capture through Npcap (Step 16a, first day).
 

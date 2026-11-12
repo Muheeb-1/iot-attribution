@@ -13,16 +13,33 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
 - Tests: 249 passed, 6 skipped. They need simulated runs in `data/` first (see Commands).
 - Simulated benchmark reproduces exactly: hard V5 56.7% top-1 / 90% top-3, easy 100% / 100%.
 - Real lab (12 captured attacks, `results/table_live.csv`): V5 11/12 top-1, 12/12 top-3.
-  The miss is `live_batch_05`: laptop-i3 was blamed.
+  The miss is `live_batch_05`: laptop-i3 was blamed. (That is the OLD rule - see Step 18.)
 - README.md is stale: its status list stops at Step 8.
-- NOT built yet: live (real-time) attribution. That is the final phase. Before any work on
-  it, read `docs/LIVE_PLAN.md` in full and follow it.
+
+## Status - 12 Nov 2026, Step 18 done
+
+- Steps 15-17 (live engine, `src/live_capture.py`, live page) and Step 18 are done and pushed.
+- rehearsal_01 (first hardware rehearsal) FAILED under the old rule: laptop-i3 named,
+  esp32-02 never flagged. Step 18 fixed it with three switches, all default ON
+  (`capture.MULTICAST_AS_BROADCAST`, `features.IAT_IGNORES_BROADCAST`,
+  `detect.SKIP_REJOIN_MINUTES`); `evaluate.py --rules old` turns all three off.
+- Measured old -> new: live batch 11/12 -> 12/12 (`results/table_live_fixed.csv`), laptop-i3
+  flagged 2 -> 0 of 12; rehearsal_01 wrong -> esp32-02 at 100%, live alert 185 s after the
+  attack; attack-free 24 sessions 1 -> 0 false alarms; simulated table1.csv byte-identical.
+  Details and two caveats (laptop's DHCP INFORM counts as a "rejoin"; laptop not judged in
+  7 of 10 baseline2 sessions): `docs/LIVE_PLAN.md` section 7, "12 Nov".
+- Tests: 458 passed, 6 skipped (12 Nov, with all pcaps present). Data in `data/` (old-rule conversions) is
+  untouched; new-rule numbers for real captures come from `--pcap-dir` re-conversion.
+- Next: rehearsal_02 on hardware with `--origin esp32-03`, then Step 19 (incident report).
 
 ## Now - final phase, approved 11 Nov 2026
 
 - Deadline: working and rehearsed by Saturday 14 Nov, end of day. Saturday is rehearsal only.
-- Steps 15-21 and their day-by-day order are in `docs/LIVE_PLAN.md` section 5; the decisions
+- Steps 15-21 and their day-by-day order are in `docs/LIVE_PLAN.md` section 5 (version 3,
+  12 Nov: Step 18 = rehearsal_01 fixes, Step 19 = incident report); the decisions
   already taken are in its section 2. Do not reopen them without asking Muheeb.
+- Recorded for later, NOT to be started without asking: Step 22 realistic beacon payload
+  (guide's request, needs re-flashing), Step 23 visual redesign of the dashboard.
 - Priority order when time is short: a demo that cannot fail > features > polish. Keep the
   fallback ladder working at every commit (live capture -> `--replay` on the live page ->
   the existing replay dashboard).
@@ -76,7 +93,7 @@ published numbers and stay untouched.
 4. Containment is recommended, never executed. The operator acts by hand; the engine only
    confirms from the traffic that the attack connections have stopped.
 5. Never commit or print secrets: `API_KEY.env`, Wi-Fi credentials, raw pcaps.
-6. Work in numbered steps (next is Step 15). Tests with the code. One commit per step with a
+6. Work in numbered steps (next is Step 19). Tests with the code. One commit per step with a
    detailed message (what, why, measured effect), then push. Ask before pushing if unsure.
 7. A step is done only when the full test suite passes and, for live features, a recorded
    capture replayed through the live path gives the same verdict as the offline pipeline.
@@ -87,9 +104,16 @@ published numbers and stay untouched.
 ```
 .venv\Scripts\activate
 python -m src.generate --runs 30 ; python -m src.generate --runs 30 --easy   # test data
-python -m pytest                                      # 249 passed, 6 skipped expected
+python -m pytest                                      # 458 passed, 6 skipped expected
 python -m src.evaluate --runs 30                      # simulated table -> results/table1.csv
-python -m src.evaluate --prefix live_batch --label live --runs 12 --out results/table_live.csv
+# real attacks, OLD rule (the published table_live.csv, from the saved runs):
+python -m src.evaluate --rules old --prefix live_batch --label live --runs 12 --out results/table_live.csv
+# real attacks, NEW rule (Step 18; re-converted from the raw captures):
+python -m src.evaluate --prefix live_batch --label live-fixed --runs 12 --pcap-dir pcap/segments --out results/table_live_fixed.csv
+python -m src.evaluate [--rules old] --prefix rehearsal --label rehearsal --runs 1 --pcap-dir pcap/live --out results/table_rehearsal_fixed.csv
+python -m src.evaluate [--rules old] --false-alarms pcap/baseline.pcapng pcap/baseline2.pcapng --out results/false_alarms_fixed.csv
+python -m src.live --session <name> [--replay <pcap>] [--speed 20]   # live engine (Step 15)
+python -m src.live_capture --session <name>          # ADMINISTRATOR terminal: the capture
 python -m src.capture pcap\<file>.pcapng --run <run_id> --baseline 720
 streamlit run dashboard/app.py
 python -m src.listener                                # beacon sink, on the master laptop
@@ -98,13 +122,15 @@ python -m src.scenario --run <run_id> [--origin esp32-02]   # one attack, answer
 
 ## Known loose ends (not yet fixed)
 
-- Dashboard sidebar still says "qwen3:4b"; the local model is llama3.2:3b, and the page
-  cannot select the cloud provider.
 - `validate_brief` checks that a timestamp exists in the evidence, not that it matches the
   connection ids cited beside it (found in Step 14).
 - Firmware has the Wi-Fi credentials hardcoded in a tracked, public file. Deferred until
   after the demo (changing them means re-flashing both boards). Do not touch before then.
 - `report.template_brief` always says the attack "spread to other devices", even when one
-  device is flagged (10 of the 12 real runs). Fixed in Step 18.
-- `capture.endpoint_name`: the multicast-is-broadcast check sits after `if ip: return ip`
-  and never fires for IP packets. Fixed, as a measured switch, in Step 19.
+  device is flagged (10 of the 12 real runs). Fixed in Step 19.
+- Step 18's rejoin rule (C3) cannot tell a DHCP INFORM (laptop-i3, Windows asking for
+  settings) from a real join (DISCOVER/REQUEST), because the flow table has no DHCP message
+  type. The laptop's INFORM minutes are left out and the live page calls them "rejoined".
+  Decide with Muheeb whether to reword the page line or restrict the rule (a measured change).
+- (Fixed: the `capture.endpoint_name` multicast bug in Step 18; the stale "qwen3:4b"
+  sidebar text and the missing provider choice in Step 17.)

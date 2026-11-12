@@ -73,11 +73,13 @@ USAGE
 from __future__ import annotations
 
 import argparse
+import ipaddress
 import json
 import shutil
 import subprocess
 import sys
 from datetime import datetime, timezone
+from functools import lru_cache
 from pathlib import Path
 
 import pandas as pd
@@ -256,6 +258,27 @@ IDLE_SECONDS = 60.0
 BROADCAST_MAC = "ff:ff:ff:ff:ff:ff"
 BROADCAST_NAME = "broadcast"
 
+# STEP 18, CHANGE C1 - multicast is "broadcast" too, also for IP packets.
+#
+# endpoint_name always MEANT to call multicast traffic "broadcast" (see its
+# comment), but the check sat after "if ip: return ip", so it never fired for
+# an IP packet. A Windows name lookup from laptop-i3 (LLMNR, UDP 5355 to
+# 224.0.0.252 or ff02::1:3), an mDNS query (224.0.0.251) or an SSDP search
+# (239.255.255.250) therefore arrived in the flow table as a raw address -
+# and features.py counted each as a "new outside address" and as an extra
+# destination. That is what flagged the innocent laptop in live_batch_05 and in
+# rehearsal_01. With this switch ON, IPv4 multicast (224.0.0.0/4), IPv6
+# multicast (ff00::/8) and the all-ones address 255.255.255.255 are named
+# "broadcast", whatever the MAC says.
+#
+# A switch, not a silent edit, so the old rule can still be scored: set it to
+# False (or run evaluate.py with --rules old) and conversion is exactly what it
+# was before Step 18. The runs already saved in data/ were converted under the
+# old rule; their meta files have no "multicast_as_broadcast" entry.
+# Measured effect: docs/LIVE_PLAN.md section 7, "Step 18".
+MULTICAST_AS_BROADCAST = True
+ALL_ONES_IPV4 = "255.255.255.255"
+
 # Exactly the columns generate.py writes, in exactly that order.
 COLUMNS = ["conn_id", "t", "src", "dst", "dport", "bytes_out", "bytes_in", "pkts"]
 
@@ -366,7 +389,25 @@ def _int_or_none(text):
         return None
 
 
-def endpoint_name(mac: str, ip: str) -> str:
+@lru_cache(maxsize=4096)
+def is_group_address(ip: str) -> bool:
+    """
+    True for an address that means "everyone listening", not one machine:
+    IPv4 multicast (224.0.0.0/4), IPv6 multicast (ff00::/8) and 255.255.255.255.
+    Anything that does not parse as an IP address is not one. Cached, because
+    a capture repeats the same few addresses thousands of times.
+    """
+    if not ip:
+        return False
+    if ip == ALL_ONES_IPV4:
+        return True
+    try:
+        return ipaddress.ip_address(ip).is_multicast
+    except ValueError:
+        return False
+
+
+def endpoint_name(mac: str, ip: str, multicast_as_broadcast: bool | None = None) -> str:
     """
     Who this address belongs to.
 
@@ -376,8 +417,13 @@ def endpoint_name(mac: str, ip: str) -> str:
 
     Returning the raw address for strangers is the point, not a fallback:
     features.py counts destinations that are new AND not in the inventory, so
-    an unknown address has to stay visibly unknown.
+    an unknown address has to stay visibly unknown. A multicast address is not
+    a stranger, though - it is "everyone on the segment" - so with the Step 18
+    switch ON (MULTICAST_AS_BROADCAST, read at call time unless passed) it is
+    named "broadcast" before the literal-address rule is reached.
     """
+    if multicast_as_broadcast is None:
+        multicast_as_broadcast = MULTICAST_AS_BROADCAST
     mac = (mac or "").lower()
     if mac in MAC_TO_NAME:
         return MAC_TO_NAME[mac]
@@ -385,6 +431,8 @@ def endpoint_name(mac: str, ip: str) -> str:
         return BROADCAST_NAME
     if ip and ip in IP_TO_NAME:
         return IP_TO_NAME[ip]
+    if multicast_as_broadcast and is_group_address(ip):
+        return BROADCAST_NAME
     if ip:
         return ip
     if mac.startswith(("01:00:5e", "33:33")):
@@ -611,6 +659,9 @@ def save_run(frame: pd.DataFrame, run_id: str, pcap_path: Path,
         "baseline_seconds": int(baseline_seconds),
         "baseline_windows": windows.baseline_window_count(baseline_seconds, window_seconds),
         "n_connections": int(len(frame)),
+        # Which naming rule built this table (Step 18, C1). Runs saved before
+        # Step 18 have no such entry: they were all converted with the old rule.
+        "multicast_as_broadcast": bool(MULTICAST_AS_BROADCAST),
         "generated_at": datetime.now(timezone.utc).isoformat(timespec="seconds"),
     }
 

@@ -1,0 +1,11 @@
+scenario,detector,method,runs,top1_pct,top3_pct,mean_rank,never_ranked,abstention_pct
+live-fixed,as prototype,B1 total bytes,12,0.0,100.0,2.0,0,
+live-fixed,as prototype,B2 anomaly score,12,0.0,100.0,2.0,0,
+live-fixed,as prototype,B3 connection count,12,0.0,100.0,2.0,0,
+live-fixed,as prototype,B4 earliest onset,12,91.7,100.0,1.08,0,
+live-fixed,as prototype,V5 (prototype indicator rule),12,100.0,100.0,1.0,0,0.0
+live-fixed,as prototype,V5 attribution,12,100.0,100.0,1.0,0,0.0
+live-fixed,weighted (fairness check),B1 total bytes,12,0.0,100.0,2.0,0,
+live-fixed,weighted (fairness check),B2 anomaly score,12,0.0,100.0,2.0,0,
+live-fixed,weighted (fairness check),B3 connection count,12,0.0,100.0,2.0,0,
+live-fixed,weighted (fairness check),B4 earliest onset,12,100.0,100.0,1.0,0,

@@ -679,6 +679,11 @@ class LiveSession:
             baseline_remaining = max(0.0, self.baseline_seconds + self.grace_seconds - now)
 
         alert = self.first_alert or {}
+        rejoins = {
+            dev: [{"window": w, "seconds": s, "epoch": None if start is None else start + s}
+                  for w, s in sorted(found.items())]
+            for dev, found in sorted(self._rejoins().items())
+        }
         return {
             "session": self.session,
             "phase": self.phase,
@@ -717,6 +722,9 @@ class LiveSession:
             "explanations": {d: res.explain_rank(d) for d in res.ranking}
             if res is not None else {},
             "onset_windows": dict(det.onset_windows) if det is not None else {},
+            # Step 18, C3: baseline minutes left out of a device's normal
+            # because it (re)joined the network then (sent a DHCP broadcast).
+            "rejoins": rejoins,
             "report": self.brief or {},
             "first_alert": self.first_alert,
             "first_alert_epoch": alert.get("raised_epoch"),
@@ -728,6 +736,23 @@ class LiveSession:
             "analysis_seconds": self.analysis_seconds,
             "saved_run": None if self.saved is None else self.session,
         }
+
+    def _rejoins(self) -> dict:
+        """
+        dev -> {window: seconds}: the baseline minutes the detector leaves out
+        because the device (re)joined the network (Step 18, C3). Once analysis
+        has run it is the detector's own list. While still LEARNING nothing is
+        scored yet, but the page can already say "that minute will not count",
+        so the same detect function is asked about the closed minutes so far.
+        """
+        if self.detection is not None:
+            return self.detection.rejoins
+        if not self.packets or self.closed_windows <= 0:
+            return {}
+        flows = self.flows()
+        closed = flows[flows["t"] < self.closed_windows * self.window_seconds]
+        return detect.rejoins_for_run(self._as_run(closed.reset_index(drop=True),
+                                                   self.closed_windows * self.window_seconds))
 
     def _strikes(self, name: str) -> int:
         """

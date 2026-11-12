@@ -304,6 +304,20 @@ def headline(state: dict) -> dict:
                                                .get(named, {}).get("onset_epoch")), since)}
 
 
+def rejoin_lines(state: dict) -> list:
+    """
+    One line per baseline minute the detector left out of a device's normal
+    because the device sent a DHCP broadcast then - it was joining or rejoining
+    the network (Step 18, C3). Read from state.json; nothing is recomputed.
+    """
+    lines = []
+    for device, minutes in sorted((state.get("rejoins") or {}).items()):
+        for m in minutes or []:
+            lines.append("%s rejoined the network at %s; that minute is not used as normal"
+                         % (device, wall(m.get("epoch"))))
+    return lines
+
+
 def verdict_change_lines(state: dict) -> list:
     """'updated 14:32:05: ...' lines, for when a later minute changes the verdict."""
     changes = state.get("verdict_changes") or []
@@ -516,6 +530,10 @@ def draw_state(state: dict, live_dir: Path, reveal: bool = False) -> None:
                     "This verdict is the offline analysis of the whole capture." % saved)
         if reveal:
             draw_reveal(state)
+
+    rejoined = rejoin_lines(state)
+    if rejoined:
+        st.info("  \n".join(rejoined))
 
     problems = state.get("problems") or []
     if problems:

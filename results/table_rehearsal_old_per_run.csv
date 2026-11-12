@@ -1,0 +1,2 @@
+run_id,scenario,origin,via_broker,V5 attribution,V5 (prototype indicator rule),confidence,abstained,abstained_prototype,indicator_edges,indicator_edges_prototype,origin_flagged,origin_flagged_plain,n_flagged,flagged,rejoin_minutes,rules,B1 total bytes,fair B1 total bytes,B2 anomaly score,fair B2 anomaly score,B3 connection count,fair B3 connection count,B4 earliest onset,fair B4 earliest onset
+rehearsal_01,capture,esp32-02,True,99,99,1.0,False,False,0,0,False,False,1,laptop-i3,,old,2,2,3,3,2,2,99,99

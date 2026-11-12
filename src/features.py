@@ -68,6 +68,29 @@ import numpy as np
 import pandas as pd
 
 from src import runs, windows
+from src.capture import BROADCAST_NAME
+
+# STEP 18, CHANGE C2 - timing regularity is measured on the device's own
+# conversations only, not on what it sends to "broadcast".
+#
+# Why: iat_reg asks "does this device tick like a timer?". laptop-i3 runs a
+# connect/disconnect loop to the broker every ~2 s, which is perfectly regular.
+# In minutes where it ALSO sent some broadcast or multicast chatter (Windows
+# name lookups, DHCP, SSDP), those extra connections land at random moments
+# between the ticks and the minute reads as irregular (iat_reg ~2-5). In
+# minutes with no such chatter, the same loop reads as a metronome (iat_reg
+# ~19). So the laptop's normal behaviour flip-flopped between two values for a
+# reason that had nothing to do with an attack, and three "regular" minutes in a
+# row were enough to flag it (rehearsal_01). Leaving broadcast connections out
+# of THIS ONE measurement makes the laptop read ~19 every minute.
+#
+# Only iat_reg changes. The other six numbers still count broadcast traffic -
+# leaving it out of all of them was tried on 11 Nov and the boards then had too
+# little baseline traffic to be judged at all (docs/LIVE_PLAN.md section 7).
+#
+# A switch, default ON; set False (or evaluate.py --rules old) for the old rule.
+# Simulated runs contain no "broadcast" destination, so they are unaffected.
+IAT_IGNORES_BROADCAST = True
 
 # The seven numbers, in a fixed order. Everything downstream refers to this
 # list rather than writing the names out again, so they can never drift apart.
@@ -98,6 +121,7 @@ def build_features(
     device_names,
     baseline_seconds: float,
     window_seconds: int = windows.WINDOW_SECONDS,
+    ignore_broadcast: bool | None = None,
 ) -> pd.DataFrame:
     """
     Summarise traffic into one row per device per window.
@@ -106,12 +130,16 @@ def build_features(
     device_names    the lab's own devices, from the asset inventory
     baseline_seconds how long the quiet "this is normal" period lasts
     window_seconds  width of a window (default 60)
+    ignore_broadcast leave "broadcast" connections out of iat_reg (Step 18,
+                    C2); None means "whatever IAT_IGNORES_BROADCAST says now"
 
     Returns a table with columns: dev, w, then the seven feature columns.
     Only devices in device_names get rows - traffic from the broker or any
     other infrastructure is ignored, because we are not trying to attribute
     the attack to a message queue.
     """
+    if ignore_broadcast is None:
+        ignore_broadcast = IAT_IGNORES_BROADCAST
     device_names = list(device_names)
     lab = set(device_names)
 
@@ -142,7 +170,14 @@ def build_features(
         # activity gives cv well above 1. We invert it so that HIGHER means
         # MORE regular, and add 0.05 so a perfectly regular device scores a
         # large finite number instead of dividing by zero.
-        times = np.sort(group["t"].values)
+        #
+        # With the Step 18 switch ON the gaps are measured only between the
+        # device's own conversations, leaving out what it sent to "broadcast"
+        # (see IAT_IGNORES_BROADCAST for why).
+        timed = group
+        if ignore_broadcast:
+            timed = group[group["dst"] != BROADCAST_NAME]
+        times = np.sort(timed["t"].values)
         gaps = np.diff(times)
         if len(gaps) > 3 and gaps.mean() > 0:
             cv = gaps.std() / gaps.mean()

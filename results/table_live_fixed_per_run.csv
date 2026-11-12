@@ -1,0 +1,13 @@
+run_id,scenario,origin,via_broker,V5 attribution,V5 (prototype indicator rule),confidence,abstained,abstained_prototype,indicator_edges,indicator_edges_prototype,origin_flagged,origin_flagged_plain,n_flagged,flagged,rejoin_minutes,rules,B1 total bytes,fair B1 total bytes,B2 anomaly score,fair B2 anomaly score,B3 connection count,fair B3 connection count,B4 earliest onset,fair B4 earliest onset
+live_batch_01,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,laptop-i3@0 laptop-i3@5,new,2,2,2,2,2,2,1,1
+live_batch_02,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,laptop-i3@1 laptop-i3@7 laptop-i3@10,new,2,2,2,2,2,2,1,1
+live_batch_03,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,laptop-i3@0 laptop-i3@3 laptop-i3@10,new,2,2,2,2,2,2,1,1
+live_batch_04,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,laptop-i3@0 laptop-i3@1 laptop-i3@6,new,2,2,2,2,2,2,2,1
+live_batch_05,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,laptop-i3@1 laptop-i3@9,new,2,2,2,2,2,2,1,1
+live_batch_06,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,laptop-i3@0 laptop-i3@3 laptop-i3@8 laptop-i3@10,new,2,2,2,2,2,2,1,1
+live_batch_07,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,laptop-i3@0 laptop-i3@6 laptop-i3@11,new,2,2,2,2,2,2,1,1
+live_batch_08,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,laptop-i3@4 laptop-i3@9,new,2,2,2,2,2,2,1,1
+live_batch_09,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,laptop-i3@4 laptop-i3@11,new,2,2,2,2,2,2,1,1
+live_batch_10,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,laptop-i3@2 laptop-i3@4,new,2,2,2,2,2,2,1,1
+live_batch_11,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,laptop-i3@0 laptop-i3@3,new,2,2,2,2,2,2,1,1
+live_batch_12,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,laptop-i3@5 laptop-i3@7 laptop-i3@9,new,2,2,2,2,2,2,1,1

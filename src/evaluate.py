@@ -66,9 +66,64 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src import attribute, detect, features, runs
+from src import attribute, capture, detect, features, runs
 
 ROOT = Path(__file__).resolve().parents[1]
+
+# --------------------------------------------------------------------------
+# The Step 18 rules, scored both ways
+# --------------------------------------------------------------------------
+# Step 18 added three measured changes, each behind its own module switch:
+#   C1 capture.MULTICAST_AS_BROADCAST   multicast / 255.255.255.255 -> "broadcast"
+#   C2 features.IAT_IGNORES_BROADCAST   iat_reg ignores "broadcast" connections
+#   C3 detect.SKIP_REJOIN_MINUTES       a baseline minute with a DHCP broadcast
+#                                       from a device is not normal for it
+# "new" is all three ON (the default everywhere); "old" is all three OFF, which
+# is exactly the pipeline the published tables up to Step 17 were made with.
+# C1 acts when packets are turned into flows, so it only shows when the runs
+# are re-converted from their capture files: use --pcap-dir for that.
+RULE_SWITCHES = [
+    (capture, "MULTICAST_AS_BROADCAST"),
+    (features, "IAT_IGNORES_BROADCAST"),
+    (detect, "SKIP_REJOIN_MINUTES"),
+]
+
+
+def set_rules(rules: str) -> None:
+    """Turn the three Step 18 switches all ON ("new") or all OFF ("old")."""
+    if rules not in ("new", "old"):
+        raise ValueError("rules must be 'new' or 'old', not %r" % rules)
+    for module, name in RULE_SWITCHES:
+        setattr(module, name, rules == "new")
+
+
+def current_rules() -> str:
+    """'new', 'old', or 'mixed' if someone has set the switches by hand."""
+    values = {bool(getattr(module, name)) for module, name in RULE_SWITCHES}
+    if values == {True}:
+        return "new"
+    if values == {False}:
+        return "old"
+    return "mixed"
+
+
+def load_for_scoring(run_id: str, data_dir=None, pcap_dir=None, tshark=None) -> runs.Run:
+    """
+    The run to score. Normally data/<run_id>.parquet as saved. With pcap_dir,
+    the traffic is instead re-converted from <pcap_dir>/<run_id>.pcapng under
+    the naming rule in force now (C1), and only the inventory and timings are
+    taken from the saved meta file - so both rules can be scored from the raw
+    captures, and the saved runs are never overwritten.
+    """
+    run = runs.load_run(run_id) if data_dir is None else runs.load_run(run_id, data_dir)
+    if pcap_dir is None:
+        return run
+    pcap = Path(pcap_dir) / ("%s.pcapng" % run_id)
+    if not pcap.exists():
+        raise FileNotFoundError("no capture file for %s at %s" % (run_id, pcap))
+    binary = capture.find_tshark(tshark)
+    run.connections = capture.build_flows(capture.read_packets(pcap, binary))
+    return run
 GROUNDTRUTH_DIR = ROOT / "groundtruth"
 RESULTS_DIR = ROOT / "results"
 
@@ -124,7 +179,8 @@ def rank_of(ranking, device) -> int:
     return ranking.index(device) + 1 if device in ranking else NOT_RANKED
 
 
-def evaluate_one(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR) -> dict:
+def evaluate_one(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR,
+                 pcap_dir=None) -> dict:
     """
     Run the whole pipeline on one saved incident and score it.
 
@@ -132,18 +188,20 @@ def evaluate_one(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR) ->
     supporting detail (confidence, whether it abstained, whether the detector
     ever flagged the true origin at all).
     """
-    run = runs.load_run(run_id) if data_dir is None else runs.load_run(run_id, data_dir)
+    run = load_for_scoring(run_id, data_dir=data_dir, pcap_dir=pcap_dir)
     table = features.features_for_run(run)
+    # Step 18, C3: empty when the switch is OFF, so the old rule is unchanged.
+    rejoins = detect.rejoins_for_run(run)
 
     # The weighted detector - what V5 uses.
     weighted = detect.detect(
         table, baseline_windows=run.baseline_windows,
-        weighted=True, window_seconds=run.window_seconds,
+        weighted=True, window_seconds=run.window_seconds, rejoins=rejoins,
     )
     # The plain detector - what the prototype fed to the four baselines.
     plain = detect.detect(
         table, baseline_windows=run.baseline_windows,
-        weighted=False, window_seconds=run.window_seconds,
+        weighted=False, window_seconds=run.window_seconds, rejoins=rejoins,
     )
 
     # Both indicator-ordering rules, on identical detections, so any
@@ -183,6 +241,12 @@ def evaluate_one(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR) ->
         "origin_flagged": origin in weighted.onsets,
         "origin_flagged_plain": origin in plain.onsets,
         "n_flagged": len(weighted.onsets),
+        # Which devices were flagged, and which baseline minutes were left out
+        # (Step 18) - so "laptop-i3 flagged in 0 of 12" is read off the file.
+        "flagged": " ".join(sorted(weighted.onsets)),
+        "rejoin_minutes": " ".join("%s@%d" % (dev, w) for dev in sorted(rejoins)
+                                   for w in sorted(rejoins[dev])),
+        "rules": current_rules(),
     }
     for name in BASELINE_NAMES:
         record[name] = rank_of(plain_baselines[name], origin)
@@ -214,7 +278,8 @@ def summarise(records: list, methods: list) -> pd.DataFrame:
 
 
 def evaluate_scenario(prefix: str, limit: int | None = None,
-                      groundtruth_dir=GROUNDTRUTH_DIR, verbose: bool = False) -> tuple:
+                      groundtruth_dir=GROUNDTRUTH_DIR, verbose: bool = False,
+                      pcap_dir=None) -> tuple:
     """Score every saved run with the given file prefix ('run' or 'easy')."""
     run_ids = runs.list_runs(prefix=prefix)
     if limit is not None:
@@ -228,7 +293,7 @@ def evaluate_scenario(prefix: str, limit: int | None = None,
 
     records = []
     for i, run_id in enumerate(run_ids, 1):
-        record = evaluate_one(run_id, groundtruth_dir=groundtruth_dir)
+        record = evaluate_one(run_id, groundtruth_dir=groundtruth_dir, pcap_dir=pcap_dir)
         records.append(record)
         if verbose:
             print("    %-10s origin %-11s V5 rank %-3s conf %3.0f%%  %s"
@@ -245,6 +310,74 @@ def evaluate_scenario(prefix: str, limit: int | None = None,
     summary = summarise(records, methods)
     fair = summarise(records, ["fair " + b for b in BASELINE_NAMES])
     return records, summary, fair
+
+
+# --------------------------------------------------------------------------
+# False alarms on attack-free captures
+# --------------------------------------------------------------------------
+
+def false_alarm_sessions(pcaps, session_seconds: int = 1500, baseline_seconds: int = 720,
+                         tshark=None) -> list:
+    """
+    Cut attack-free captures into back-to-back sessions and count the alarms.
+
+    Each capture is read once; its packets are cut into consecutive slices of
+    session_seconds, measured from the capture's first packet (the same t = 0
+    rule as build_flows). A slice shorter than a full session at the end is
+    dropped. Each slice is then treated exactly like a live session: its own
+    flows, its own first baseline_seconds as normal, the unchanged detector.
+    Nothing was attacked in these recordings, so ANY device with an onset is a
+    false alarm. No answer file is needed or read.
+    """
+    binary = capture.find_tshark(tshark)
+    records = []
+    for pcap in pcaps:
+        pcap = Path(pcap)
+        packets = capture.read_packets(pcap, binary)
+        start, newest = None, None
+        slices: dict = {}
+        for packet in packets:
+            try:
+                when = float(packet["frame.time_epoch"])
+            except (TypeError, ValueError):
+                continue
+            if start is None:
+                start = when
+            newest = when if newest is None else max(newest, when)
+            slices.setdefault(int((when - start) // session_seconds), []).append(packet)
+        # Only whole sessions: the capture must run to the end of the slice.
+        whole = int((newest - start) // session_seconds) if start is not None else 0
+        for k in range(whole):
+            chunk = slices.get(k, [])
+            if not chunk:
+                continue
+            flows = capture.build_flows(chunk)
+            run = runs.Run(
+                run_id="%s_%02d" % (pcap.stem, k), scenario="capture", connections=flows,
+                device_names=list(capture.DEVICE_KINDS),
+                devices=[{"name": n, "kind": t} for n, t in capture.DEVICE_KINDS.items()],
+                window_seconds=60, capture_seconds=int(round(float(flows["t"].max()))),
+                baseline_seconds=int(baseline_seconds),
+                baseline_windows=int(baseline_seconds // 60),
+            )
+            detection = detect.detect_run(run)
+            rejoins = detection.rejoins
+            records.append({
+                "pcap": pcap.name,
+                "session": k,
+                "start_seconds": k * session_seconds,
+                "devices_seen": " ".join(sorted(set(flows["src"]) & set(run.device_names))),
+                "false_alarm": bool(detection.onsets),
+                "flagged": " ".join(sorted(detection.onsets)),
+                # A device skipped for too little baseline was not judged at
+                # all - "quiet" must not be read as "judged normal" for it.
+                "skipped": " ".join(sorted(set(detection.skipped)
+                                           & (set(flows["src"]) & set(run.device_names)))),
+                "rejoin_minutes": " ".join("%s@%d" % (d, w) for d in sorted(rejoins)
+                                           for w in sorted(rejoins[d])),
+                "rules": current_rules(),
+            })
+    return records
 
 
 # --------------------------------------------------------------------------
@@ -301,7 +434,44 @@ def main(argv=None) -> int:
                              "(defaults to --prefix)")
     parser.add_argument("--verbose", action="store_true", help="print a line for every run")
     parser.add_argument("--out", default=str(RESULTS_DIR / "table1.csv"))
+    parser.add_argument("--rules", choices=["new", "old"], default="new",
+                        help="Step 18 rules: new = all three changes ON (default), "
+                             "old = the pipeline as it was up to Step 17")
+    parser.add_argument("--pcap-dir", default=None,
+                        help="re-convert each run from <dir>/<run_id>.pcapng under the chosen "
+                             "rules instead of reading the saved data/<run_id>.parquet - "
+                             "needed to score the multicast naming change (C1)")
+    parser.add_argument("--false-alarms", nargs="+", default=None, metavar="PCAP",
+                        help="instead of scoring attacks: cut these attack-free captures into "
+                             "sessions and count the sessions in which anything was flagged")
+    parser.add_argument("--session-minutes", type=int, default=25,
+                        help="session length for --false-alarms (default 25)")
+    parser.add_argument("--baseline", type=int, default=720,
+                        help="baseline seconds for --false-alarms (default 720)")
     args = parser.parse_args(argv)
+
+    set_rules(args.rules)
+    print("\n  rules: %s%s" % (args.rules, " (Step 18 changes ON)" if args.rules == "new"
+                               else " (as up to Step 17)"))
+
+    if args.false_alarms:
+        records = false_alarm_sessions(args.false_alarms,
+                                       session_seconds=args.session_minutes * 60,
+                                       baseline_seconds=args.baseline)
+        alarms = [r for r in records if r["false_alarm"]]
+        print("\n  FALSE ALARMS - %d attack-free sessions of %d minutes, %d-minute baseline"
+              % (len(records), args.session_minutes, args.baseline // 60))
+        for r in records:
+            print("    %-18s session %2d  %-38s %s%s"
+                  % (r["pcap"], r["session"], r["devices_seen"],
+                     "FALSE ALARM: %s" % r["flagged"] if r["false_alarm"] else "quiet",
+                     "  (left out: %s)" % r["rejoin_minutes"] if r["rejoin_minutes"] else ""))
+        print("\n  %d false alarm(s) in %d sessions" % (len(alarms), len(records)))
+        out_path = Path(args.out)
+        out_path.parent.mkdir(parents=True, exist_ok=True)
+        pd.DataFrame(records).to_csv(out_path, index=False)
+        print("  saved: %s\n" % out_path)
+        return 0
 
     all_rows = []
     all_records = []
@@ -322,7 +492,7 @@ def main(argv=None) -> int:
     for label, prefix, expected1, expected3 in scenarios:
         print("\n  scoring %s runs..." % label)
         records, summary, fair = evaluate_scenario(
-            prefix, limit=args.runs, verbose=args.verbose
+            prefix, limit=args.runs, verbose=args.verbose, pcap_dir=args.pcap_dir
         )
 
         n = len(records)
