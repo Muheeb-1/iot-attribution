@@ -282,6 +282,30 @@ ALL_ONES_IPV4 = "255.255.255.255"
 # Exactly the columns generate.py writes, in exactly that order.
 COLUMNS = ["conn_id", "t", "src", "dst", "dport", "bytes_out", "bytes_in", "pkts"]
 
+# STEP 18b - one extra fact per flow: did its sender have no address yet?
+#
+# A device that is JOINING the network does not have an IP address yet, so its
+# DHCP DISCOVER and REQUEST are sent from 0.0.0.0. That is exactly what
+# esp32-02 did when it dropped off and came back in rehearsal_01 (+695 s).
+# Windows also sends a DHCP broadcast now and then - an INFORM, "tell me the
+# network settings" - but it sends it from the address it already has
+# (laptop-i3: 192.168.0.218), because it is not joining anything. In the
+# eight columns above the two look identical (dst "broadcast", dport 67), so
+# Step 18's rejoin rule caught both. This column tells them apart:
+#
+#   src_unassigned   True if the flow's initiator sent at least one of its
+#                    packets from 0.0.0.0 ("I have no address yet").
+#
+# It is an EXTRA column, after the eight, so nothing that reads the eight
+# changes. Runs saved before Step 18b - and every simulated run - do not have
+# it; detect.rejoin_minutes then finds no rejoin at all (the honest reading:
+# the fact was never recorded). The message type itself (DISCOVER = 1,
+# REQUEST = 3, INFORM = 8) is not needed: the source address already says
+# whether the device had joined.
+UNASSIGNED_IPV4 = "0.0.0.0"
+SRC_UNASSIGNED = "src_unassigned"
+FLOW_COLUMNS = COLUMNS + [SRC_UNASSIGNED]
+
 # The fields pulled out of each packet. occurrence=f (first) matters: a frame
 # with tunnelled or nested layers reports several ip.src values, and we want
 # the outermost one rather than a tab-separated pair that parses as neither.
@@ -491,7 +515,8 @@ def packet_shape(packet: dict):
 class _Flow:
     """One conversation being accumulated. Not exported; see build_flows."""
 
-    __slots__ = ("t", "src", "dst", "dport", "bytes_out", "bytes_in", "pkts", "last")
+    __slots__ = ("t", "src", "dst", "dport", "bytes_out", "bytes_in", "pkts", "last",
+                 "src_unassigned")
 
     def __init__(self, t, src, dst, dport):
         self.t = t
@@ -502,10 +527,13 @@ class _Flow:
         self.bytes_in = 0       # responder -> initiator
         self.pkts = 0
         self.last = t
+        self.src_unassigned = False   # Step 18b: initiator spoke from 0.0.0.0
 
-    def add(self, t, length, from_initiator):
+    def add(self, t, length, from_initiator, unassigned=False):
         if from_initiator:
             self.bytes_out += length
+            if unassigned:
+                self.src_unassigned = True
         else:
             self.bytes_in += length
         self.pkts += 1
@@ -520,12 +548,14 @@ class _Flow:
             "bytes_out": self.bytes_out,
             "bytes_in": self.bytes_in,
             "pkts": self.pkts,
+            SRC_UNASSIGNED: self.src_unassigned,
         }
 
 
 def build_flows(packets: list[dict], idle_seconds: float = IDLE_SECONDS) -> pd.DataFrame:
     """
     Group packets into flows and return the table, times relative to t=0.
+    The eight COLUMNS, then src_unassigned (Step 18b, see FLOW_COLUMNS).
 
     Kept as a plain function taking plain dicts - no files, no tshark - so it
     can be tested with a handful of hand-written packets, the same way
@@ -537,7 +567,7 @@ def build_flows(packets: list[dict], idle_seconds: float = IDLE_SECONDS) -> pd.D
     be zero everywhere.
     """
     if not packets:
-        return pd.DataFrame(columns=COLUMNS)
+        return pd.DataFrame(columns=FLOW_COLUMNS)
 
     start = None
     open_flows = {}
@@ -577,7 +607,8 @@ def build_flows(packets: list[dict], idle_seconds: float = IDLE_SECONDS) -> pd.D
             flow = _Flow(t, src, dst, dport if dport is not None else 0)
             open_flows[key] = flow
 
-        flow.add(t, length, from_initiator=(src == flow.src))
+        flow.add(t, length, from_initiator=(src == flow.src),
+                 unassigned=(packet.get("ip.src") == UNASSIGNED_IPV4))
 
     done.extend(open_flows.values())
 
@@ -591,7 +622,8 @@ def build_flows(packets: list[dict], idle_seconds: float = IDLE_SECONDS) -> pd.D
     frame["bytes_in"] = frame["bytes_in"].astype("int64")
     frame["pkts"] = frame["pkts"].astype("int32")
     frame["dport"] = frame["dport"].astype("int32")
-    return frame[COLUMNS]
+    frame[SRC_UNASSIGNED] = frame[SRC_UNASSIGNED].astype(bool)
+    return frame[FLOW_COLUMNS]
 
 
 # --------------------------------------------------------------------------

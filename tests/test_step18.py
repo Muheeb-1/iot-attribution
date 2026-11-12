@@ -39,23 +39,28 @@ LAB = ["dev-a", "dev-b"]
 
 @pytest.fixture
 def rules(monkeypatch):
-    """Set the three switches for one test; monkeypatch puts them back after."""
+    """Set the switches to one rule set ("new", "step18", "old") for one test;
+    monkeypatch puts them back after. (Step 18b added the fourth switch.)"""
     def use(which):
-        for module, name in evaluate.RULE_SWITCHES:
-            monkeypatch.setattr(module, name, which == "new")
+        for (module, name), value in zip(evaluate.RULE_SWITCHES, evaluate.RULES[which]):
+            monkeypatch.setattr(module, name, value)
     return use
 
 
-def test_all_three_switches_are_on_by_default():
+def test_all_switches_are_on_by_default():
     assert capture.MULTICAST_AS_BROADCAST is True
     assert features.IAT_IGNORES_BROADCAST is True
     assert detect.SKIP_REJOIN_MINUTES is True
+    assert detect.REJOIN_NEEDS_UNASSIGNED is True
     assert evaluate.current_rules() == "new"
 
 
-def test_rules_can_be_set_old_and_new_and_nothing_else(rules):
+def test_rules_can_be_set_old_step18_and_new_and_nothing_else(rules):
     rules("old")
     assert evaluate.current_rules() == "old"
+    evaluate.set_rules("step18")
+    assert evaluate.current_rules() == "step18"
+    assert detect.SKIP_REJOIN_MINUTES and not detect.REJOIN_NEEDS_UNASSIGNED
     evaluate.set_rules("new")
     assert evaluate.current_rules() == "new"
     with pytest.raises(ValueError):
@@ -216,7 +221,9 @@ def test_rejoin_minutes_are_dhcp_broadcasts_in_the_baseline_by_lab_devices():
         (10.0, "router", "broadcast", 67),     # not a lab device
         (20.0, "dev-b", "broadcast", 67),      # minute 0: counted
     ])
-    found = detect.rejoin_minutes(table, LAB, baseline_windows=12)
+    # Step 18's rule (any DHCP broadcast); Step 18b's narrower one is tested
+    # in tests/test_step18b.py.
+    found = detect.rejoin_minutes(table, LAB, baseline_windows=12, needs_unassigned=False)
     assert found == {"dev-a": {11: 695.3}, "dev-b": {0: 20.0}}
 
 
@@ -299,7 +306,9 @@ def _run(connections, baseline_seconds=720):
 def test_detect_run_finds_the_rejoins_itself_and_obeys_the_switch(monkeypatch):
     records = [(60.0 * w + 5, dev, "broker", 1883) for w in range(20) for dev in LAB]
     records.append((695.3, "dev-a", "broadcast", 67))
-    run = _run(flows(records))
+    table = flows(records)
+    table["src_unassigned"] = table["dport"] == 67      # a real join, from 0.0.0.0
+    run = _run(table)
     assert detect.detect_run(run).rejoins == {"dev-a": {11: 695.3}}
     monkeypatch.setattr(detect, "SKIP_REJOIN_MINUTES", False)
     assert detect.detect_run(run).rejoins == {}
@@ -423,12 +432,13 @@ needs_baselines = pytest.mark.skipif(not all(p.exists() for p in BASELINES) or _
 
 
 @needs_rehearsal
-def test_rehearsal_01_old_rule_blamed_the_laptop_and_new_rule_names_the_board(rules):
+@pytest.mark.parametrize("which", ["step18", "new"])
+def test_rehearsal_01_old_rule_blamed_the_laptop_and_new_rule_names_the_board(rules, which):
     rules("old")
     _, det_old, old = _scored("rehearsal_01", REHEARSAL)
     assert old.named == "laptop-i3" and "esp32-02" not in det_old.onsets   # the failure
 
-    rules("new")
+    rules(which)
     _, det, new = _scored("rehearsal_01", REHEARSAL)
     assert new.named == "esp32-02" == _answer("rehearsal_01")["origin"]
     assert new.confidence_percent == 100
@@ -481,7 +491,9 @@ def test_under_the_old_rule_the_published_runs_reproduce_exactly(rules, pcap):
         pytest.skip("no data/%s.parquet" % pcap.stem)
     rules("old")
     frame = capture.build_flows(list(_packets(str(pcap))))
-    pd.testing.assert_frame_equal(frame, pd.read_parquet(published))
+    # The eight original columns; Step 18b's extra src_unassigned column comes
+    # after them and is not in the runs saved before it.
+    pd.testing.assert_frame_equal(frame[capture.COLUMNS], pd.read_parquet(published))
 
 
 @needs_segments
@@ -489,18 +501,19 @@ def test_the_live_batch_is_11_of_12_old_and_12_of_12_new(rules):
     if len(SEGMENT_FILES) != 12:
         pytest.skip("expects all 12 segments")
     counts = {}
-    for which in ("old", "new"):
+    for which in ("old", "step18", "new"):
         rules(which)
         counts[which] = sum(_scored(p.stem, p)[2].named == _answer(p.stem)["origin"]
                             for p in SEGMENT_FILES)
-    assert counts == {"old": 11, "new": 12}
+    assert counts == {"old": 11, "step18": 12, "new": 12}
 
 
 @needs_baselines
-def test_attack_free_sessions_one_false_alarm_old_none_new(rules):
+@pytest.mark.parametrize("which", ["step18", "new"])
+def test_attack_free_sessions_one_false_alarm_old_none_new(rules, which):
     rules("old")
     old = evaluate.false_alarm_sessions(BASELINES, session_seconds=1500, baseline_seconds=720)
-    rules("new")
+    rules(which)
     new = evaluate.false_alarm_sessions(BASELINES, session_seconds=1500, baseline_seconds=720)
     assert len(old) == len(new) == 24
     assert [(r["pcap"], r["session"], r["flagged"]) for r in old if r["false_alarm"]] == \

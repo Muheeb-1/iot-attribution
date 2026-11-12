@@ -159,6 +159,16 @@ default ON, so the old rule can still be scored (`python -m src.evaluate --rules
 - Tests: `tests/test_step18.py` (unit tests per change; acceptance on rehearsal_01, the 12
   segments and the 24 attack-free sessions, skipping when the pcaps are absent).
 
+**Step 18b - C3 narrowed to real (re)joins (done 12 Nov, after rehearsal_02)**
+- **C3b** `detect.REJOIN_NEEDS_UNASSIGNED`: a rejoin minute needs a DHCP broadcast sent from
+  0.0.0.0 (a device with no address yet: DISCOVER/REQUEST). Windows' DHCP INFORM (type 8)
+  is sent from the laptop's own address and no longer counts. The fact travels in a new,
+  ninth flow-table column `src_unassigned` (after the original eight); tables without it
+  (runs saved before 18b, simulated runs) have no rejoins. `--rules step18` turns only C3b
+  off, so Step 18 as measured can still be reproduced. Measured: section 7, "Step 18b".
+- Also: `src/scenario.py` refuses, before sending the trigger, when the answer file
+  already exists; `--force` replaces it. Tests: `tests/test_step18b.py`.
+
 ### Friday 13 Nov
 
 **Step 19 - the incident report (the centrepiece)**
@@ -309,6 +319,43 @@ OFF, new = all ON; the 12 captures and rehearsal_01 re-converted from the raw pc
   (9 minutes used). In the 12 attacks and rehearsal_01 the laptop is judged every time.
 - The fixes were found on the captures they improve (C1 on the 12, C2/C3 on rehearsal_01).
   rehearsal_02 onwards (Step 20) is the independent check.
+
+12 Nov, rehearsal_02 on hardware (`--origin esp32-03`, the first session under the Step 18
+rules): **correct** - esp32-03 named at 100%, live alert 3 min 54 s after the trigger
+(17:27:44). The trigger was first sent as `--run rehearsal_01` by mistake and the
+rehearsal_02 command 20 s later; both answer files were repaired by hand (rehearsal_02's start
+is the first command). Replayed from the recording: the third abnormal minute closes 225.1 s
+after the trigger and the alert is raised 229.6 s after it (on the laptop, live, 234.5 s: the
+real capture writes a file every 10 s and the engine waits for it to finish).
+
+12 Nov, Step 18b - C3 narrowed to rejoins from 0.0.0.0. Rules: old = all off; step18 = C1-C3
+on (as measured above); new = C1-C3 + C3b. All from the raw captures (`--pcap-dir`).
+
+| set | old | step18 | new (18b) |
+|---|---|---|---|
+| 12 segments + rehearsal_01 + rehearsal_02: V5 correct | 12/14 | 14/14 | **14/14**, all at 100% |
+| rehearsal_02 alone (first independent test) | correct | correct | correct |
+| rejoin minutes found (14 attack runs) | - | laptop-i3 in all 14 runs, esp32-02 @11 in rehearsal_01 | **only esp32-02 @11 in rehearsal_01** |
+| laptop-i3 flagged / not judged (14 attack runs) | flagged in 3 | 0 / 0 | 0 / 0 |
+| attack-free, 24 sessions: false alarms | 1 | 0 | **0** |
+| attack-free: laptop present but not judged (of 10) | 2 | 7 | **2** (baseline2 #3, #5) |
+| live batch, B4 earliest onset (plain detector) top-1 | - | 91.7% | 100% (live_batch_04) |
+| simulated `results/table1.csv` | - | byte-identical | byte-identical |
+
+- Tables: `results/table_live_fixed.csv`, `table_rehearsal_fixed.csv` and
+  `false_alarms_fixed.csv` are now the 18b rule; Step 18's versions are kept, reproduced by
+  `--rules step18`, as `table_live_step18.csv`, `table_rehearsal_step18.csv`,
+  `false_alarms_step18.csv` (per-run rows identical to the Step 18 commit's `*_fixed` files,
+  apart from the "rules" label). `table_rehearsal_old.csv` and `table_rehearsal_fixed.csv`
+  now hold both rehearsals (2 runs).
+- rehearsal_02, laptop-i3: no whole minute after the baseline over the line (highest 3.17
+  in the live replay). Offline, the 8-second stub at the very end of the capture (window 24,
+  scored only in the final pass after STOP) reads 53.9; one minute cannot make an onset.
+- Caveat 1 above is resolved: the laptop's INFORM minutes are used as normal again and the
+  page no longer says "laptop-i3 rejoined". Caveat 2 is back to the pre-Step-18 level (2 of
+  10 sessions; old rule: 2).
+- C3b was designed after looking at rehearsal_01/02 and the attack-free captures, like C3.
+  The Step 20 sessions remain the independent check.
 
 Not testable off the laptop: live capture through Npcap (Step 16a, first day).
 

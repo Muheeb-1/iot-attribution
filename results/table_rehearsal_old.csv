@@ -1,11 +1,11 @@
 scenario,detector,method,runs,top1_pct,top3_pct,mean_rank,never_ranked,abstention_pct
-rehearsal,as prototype,B1 total bytes,1,0.0,100.0,2.0,0,
-rehearsal,as prototype,B2 anomaly score,1,0.0,100.0,3.0,0,
-rehearsal,as prototype,B3 connection count,1,0.0,100.0,2.0,0,
-rehearsal,as prototype,B4 earliest onset,1,0.0,0.0,,1,
-rehearsal,as prototype,V5 (prototype indicator rule),1,0.0,0.0,,1,0.0
-rehearsal,as prototype,V5 attribution,1,0.0,0.0,,1,0.0
-rehearsal,weighted (fairness check),B1 total bytes,1,0.0,100.0,2.0,0,
-rehearsal,weighted (fairness check),B2 anomaly score,1,0.0,100.0,3.0,0,
-rehearsal,weighted (fairness check),B3 connection count,1,0.0,100.0,2.0,0,
-rehearsal,weighted (fairness check),B4 earliest onset,1,0.0,0.0,,1,
+rehearsal,as prototype,B1 total bytes,2,0.0,100.0,2.0,0,
+rehearsal,as prototype,B2 anomaly score,2,0.0,100.0,2.5,0,
+rehearsal,as prototype,B3 connection count,2,0.0,100.0,2.0,0,
+rehearsal,as prototype,B4 earliest onset,2,50.0,50.0,1.0,1,
+rehearsal,as prototype,V5 (prototype indicator rule),2,50.0,50.0,1.0,1,0.0
+rehearsal,as prototype,V5 attribution,2,50.0,50.0,1.0,1,0.0
+rehearsal,weighted (fairness check),B1 total bytes,2,0.0,100.0,2.0,0,
+rehearsal,weighted (fairness check),B2 anomaly score,2,0.0,100.0,2.5,0,
+rehearsal,weighted (fairness check),B3 connection count,2,0.0,100.0,2.0,0,
+rehearsal,weighted (fairness check),B4 earliest onset,2,50.0,50.0,1.0,1,

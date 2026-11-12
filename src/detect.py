@@ -99,7 +99,7 @@ import pandas as pd
 from sklearn.ensemble import IsolationForest
 
 from src import features, runs, windows
-from src.capture import BROADCAST_NAME
+from src.capture import BROADCAST_NAME, SRC_UNASSIGNED
 
 # How diagnostic each feature is of an actual compromise, rather than merely
 # of an unusual day. See the docstring above for the reasoning.
@@ -149,6 +149,27 @@ ISO_WEIGHT = 1.5           # how loudly the second opinion is allowed to speak
 SKIP_REJOIN_MINUTES = True
 DHCP_SERVER_PORT = 67
 
+# STEP 18b - only a REAL (re)join counts: a DHCP broadcast sent from 0.0.0.0.
+#
+# What Step 18's rule got wrong: laptop-i3 (Windows) sends a DHCP INFORM
+# broadcast in 2-4 of its baseline minutes in every session. INFORM means
+# "send me the network settings"; the laptop is not joining anything, and it
+# sends it from the address it already has (192.168.0.218). A device that is
+# really joining has no address yet and sends its DISCOVER/REQUEST from
+# 0.0.0.0 - as esp32-02 did at +695 s in rehearsal_01. With the Step 18 rule
+# the laptop's INFORM minutes were left out too, the live page said "laptop-i3
+# rejoined the network", and in 7 of 10 attack-free baseline2 sessions the
+# laptop lost so many minutes it was not judged at all.
+#
+# The rule now: a baseline minute is left out only if the device sent a DHCP
+# broadcast from 0.0.0.0 in it. That fact is the flow table's src_unassigned
+# column (capture.FLOW_COLUMNS). A table without that column - a run saved
+# before Step 18b, or any simulated run - has no rejoins.
+#
+# A switch, default ON; False gives back Step 18's broader rule
+# (evaluate.py --rules step18), so the two can be scored side by side.
+REJOIN_NEEDS_UNASSIGNED = True
+
 
 @dataclass
 class Detection:
@@ -185,6 +206,7 @@ def rejoin_minutes(
     device_names,
     baseline_windows: int,
     window_seconds: int = windows.WINDOW_SECONDS,
+    needs_unassigned: bool | None = None,
 ) -> dict:
     """
     The baseline minutes in which each device (re)joined the network.
@@ -195,8 +217,17 @@ def rejoin_minutes(
     that never sent one is absent. Read from the flow table - the same one
     features.py reads - so it needs no extra input and works the same on a
     saved run, a live session and a simulated run (which has none).
+
+    needs_unassigned (default: REJOIN_NEEDS_UNASSIGNED, read at call time) is
+    the Step 18b rule: only a broadcast sent from 0.0.0.0 counts, so a
+    Windows DHCP INFORM does not. A table without the src_unassigned column
+    then has no rejoins at all.
     """
+    if needs_unassigned is None:
+        needs_unassigned = REJOIN_NEEDS_UNASSIGNED
     needed = {"t", "src", "dst", "dport"}
+    if needs_unassigned:
+        needed.add(SRC_UNASSIGNED)
     if connections is None or len(connections) == 0 or not needed <= set(connections.columns):
         return {}
     lab = set(device_names)
@@ -205,6 +236,8 @@ def rejoin_minutes(
         & (connections["dport"] == DHCP_SERVER_PORT)
         & (connections["src"].isin(lab))
     ]
+    if needs_unassigned:
+        asks = asks[asks[SRC_UNASSIGNED].astype(bool)]
     if asks.empty:
         return {}
     asks = asks.assign(w=windows.window_of(asks["t"], window_seconds))

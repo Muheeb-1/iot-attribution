@@ -73,37 +73,46 @@ ROOT = Path(__file__).resolve().parents[1]
 # --------------------------------------------------------------------------
 # The Step 18 rules, scored both ways
 # --------------------------------------------------------------------------
-# Step 18 added three measured changes, each behind its own module switch:
-#   C1 capture.MULTICAST_AS_BROADCAST   multicast / 255.255.255.255 -> "broadcast"
-#   C2 features.IAT_IGNORES_BROADCAST   iat_reg ignores "broadcast" connections
-#   C3 detect.SKIP_REJOIN_MINUTES       a baseline minute with a DHCP broadcast
+# Step 18 added three measured changes, each behind its own module switch, and
+# Step 18b narrowed the third:
+#   C1  capture.MULTICAST_AS_BROADCAST  multicast / 255.255.255.255 -> "broadcast"
+#   C2  features.IAT_IGNORES_BROADCAST  iat_reg ignores "broadcast" connections
+#   C3  detect.SKIP_REJOIN_MINUTES      a baseline minute with a DHCP broadcast
 #                                       from a device is not normal for it
-# "new" is all three ON (the default everywhere); "old" is all three OFF, which
-# is exactly the pipeline the published tables up to Step 17 were made with.
-# C1 acts when packets are turned into flows, so it only shows when the runs
-# are re-converted from their capture files: use --pcap-dir for that.
+#   C3b detect.REJOIN_NEEDS_UNASSIGNED  ...only if it was sent from 0.0.0.0, i.e.
+#                                       a real (re)join, not a Windows INFORM
+# "new" is all four ON (the default everywhere); "step18" is C1-C3 ON and C3b
+# OFF, the rule Step 18 was measured with; "old" is all OFF, exactly the
+# pipeline the published tables up to Step 17 were made with. C1 acts when
+# packets are turned into flows, and C3b needs the src_unassigned column that
+# only a fresh conversion has, so both only show with --pcap-dir.
 RULE_SWITCHES = [
     (capture, "MULTICAST_AS_BROADCAST"),
     (features, "IAT_IGNORES_BROADCAST"),
     (detect, "SKIP_REJOIN_MINUTES"),
+    (detect, "REJOIN_NEEDS_UNASSIGNED"),
 ]
+RULES = {
+    "new": (True, True, True, True),
+    "step18": (True, True, True, False),
+    "old": (False, False, False, False),
+}
 
 
 def set_rules(rules: str) -> None:
-    """Turn the three Step 18 switches all ON ("new") or all OFF ("old")."""
-    if rules not in ("new", "old"):
-        raise ValueError("rules must be 'new' or 'old', not %r" % rules)
-    for module, name in RULE_SWITCHES:
-        setattr(module, name, rules == "new")
+    """Set the switches to one of RULES: "new", "step18" or "old"."""
+    if rules not in RULES:
+        raise ValueError("rules must be one of %s, not %r" % (", ".join(RULES), rules))
+    for (module, name), value in zip(RULE_SWITCHES, RULES[rules]):
+        setattr(module, name, value)
 
 
 def current_rules() -> str:
-    """'new', 'old', or 'mixed' if someone has set the switches by hand."""
-    values = {bool(getattr(module, name)) for module, name in RULE_SWITCHES}
-    if values == {True}:
-        return "new"
-    if values == {False}:
-        return "old"
+    """'new', 'step18', 'old', or 'mixed' if someone has set the switches by hand."""
+    values = tuple(bool(getattr(module, name)) for module, name in RULE_SWITCHES)
+    for name, wanted in RULES.items():
+        if values == wanted:
+            return name
     return "mixed"
 
 
@@ -434,9 +443,10 @@ def main(argv=None) -> int:
                              "(defaults to --prefix)")
     parser.add_argument("--verbose", action="store_true", help="print a line for every run")
     parser.add_argument("--out", default=str(RESULTS_DIR / "table1.csv"))
-    parser.add_argument("--rules", choices=["new", "old"], default="new",
-                        help="Step 18 rules: new = all three changes ON (default), "
-                             "old = the pipeline as it was up to Step 17")
+    parser.add_argument("--rules", choices=list(RULES), default="new",
+                        help="new = the Step 18 changes with the Step 18b rejoin rule "
+                             "(default); step18 = as measured in Step 18 (any DHCP "
+                             "broadcast is a rejoin); old = as up to Step 17")
     parser.add_argument("--pcap-dir", default=None,
                         help="re-convert each run from <dir>/<run_id>.pcapng under the chosen "
                              "rules instead of reading the saved data/<run_id>.parquet - "
@@ -451,8 +461,10 @@ def main(argv=None) -> int:
     args = parser.parse_args(argv)
 
     set_rules(args.rules)
-    print("\n  rules: %s%s" % (args.rules, " (Step 18 changes ON)" if args.rules == "new"
-                               else " (as up to Step 17)"))
+    print("\n  rules: %s%s" % (args.rules, {
+        "new": " (Step 18 changes ON, Step 18b rejoin rule)",
+        "step18": " (Step 18 changes ON, any DHCP broadcast is a rejoin)",
+        "old": " (as up to Step 17)"}[args.rules]))
 
     if args.false_alarms:
         records = false_alarm_sessions(args.false_alarms,

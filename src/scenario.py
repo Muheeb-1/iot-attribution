@@ -57,6 +57,17 @@ USAGE
     python -m src.scenario --run run_031      # do it, write groundtruth/run_031.json
     python -m src.scenario --origin esp32-02  # force the origin instead of random
     python -m src.scenario --seed 7           # reproducible "random" pick
+    python -m src.scenario --run run_031 --force   # replace an existing answer file
+
+AN ANSWER FILE IS NEVER OVERWRITTEN BY ACCIDENT
+-----------------------------------------------
+On 12 Nov the rehearsal_02 attack was started with "--run rehearsal_01" by
+mistake. The trigger went out and rehearsal_01's answer (a different board,
+two hours earlier) was replaced; it had to be repaired by hand. So now, if
+groundtruth/<run>.json already exists, this script stops BEFORE it publishes
+anything - no trigger, no file - and says so. --force is the only way to
+replace an answer file. The check only asks whether the file exists; it never
+opens it, so the "may write, may not read" rule below still holds.
 
 Typical live workflow:
     1. start src/listener.py on the 192.168.0.200 host (the beacon sink)
@@ -286,13 +297,40 @@ def build_answer(origin: str, run_id: str, start: datetime,
     }
 
 
-def write_answer(answer: dict, answer_dir: Path = ANSWER_DIR) -> Path:
-    """Write groundtruth/<run_id>.json. Writes only - never reads anything back."""
+def answer_file(run_id: str, answer_dir: Path = ANSWER_DIR) -> Path:
+    """Where the answer for run_id is written: groundtruth/<run_id>.json."""
+    return Path(answer_dir) / ("%s.json" % run_id)
+
+
+def write_answer(answer: dict, answer_dir: Path = ANSWER_DIR, force: bool = False) -> Path:
+    """
+    Write groundtruth/<run_id>.json. Writes only - never reads anything back.
+
+    Refuses (FileExistsError) if the file is already there, unless force: the
+    file is opened in "x" mode, which the operating system itself refuses when
+    the file exists, so even two attacks started at once cannot both write it.
+    """
     answer_dir = Path(answer_dir)
     answer_dir.mkdir(parents=True, exist_ok=True)
-    path = answer_dir / ("%s.json" % answer["run_id"])
-    path.write_text(json.dumps(answer, indent=2), encoding="utf-8")
+    path = answer_file(answer["run_id"], answer_dir)
+    text = json.dumps(answer, indent=2)
+    # Two literal modes, so tests/test_no_groundtruth_leak.py can see that both
+    # only ever write.
+    if force:
+        with open(path, "w", encoding="utf-8") as handle:
+            handle.write(text)
+    else:
+        with open(path, "x", encoding="utf-8") as handle:
+            handle.write(text)
     return path
+
+
+def refuse_message(path: Path) -> str:
+    """What the operator is told when the answer file already exists."""
+    return ("  REFUSED: %s already exists, so this run id has been used before.\n"
+            "  Nothing was sent to the board and no file was written.\n"
+            "  Use a new --run id (e.g. the next session number), or add --force\n"
+            "  if replacing that answer file is really what you mean." % path)
 
 
 # --------------------------------------------------------------------------
@@ -323,6 +361,9 @@ def main(argv=None) -> int:
     parser.add_argument("--beacon-port", type=int, default=BEACON_PORT)
     parser.add_argument("--dry-run", action="store_true",
                         help="print the plan and exit without touching hardware or disk")
+    parser.add_argument("--force", action="store_true",
+                        help="replace groundtruth/<run>.json if it already exists "
+                             "(without this the attack is refused before it is sent)")
     args = parser.parse_args(argv)
 
     now = datetime.now(timezone.utc)
@@ -338,9 +379,20 @@ def main(argv=None) -> int:
                       args.beacon_host, args.beacon_port)
     print_plan(plan, dry_run=args.dry_run)
 
+    # Checked BEFORE the trigger: a wrong --run must not attack a board and
+    # then either overwrite an old answer or leave the attack unrecorded.
+    path = answer_file(run_id, ANSWER_DIR)
+    taken = path.exists() and not args.force
+
     if args.dry_run:
+        if taken:
+            print(refuse_message(path).replace("REFUSED", "WOULD BE REFUSED"))
         print("  (dry run: no MQTT sent, no truth file written)\n")
         return 0
+
+    if taken:
+        print(refuse_message(path) + "\n", file=sys.stderr)
+        return 1
 
     topic = TRIGGER_TOPIC % origin
     try:
@@ -358,7 +410,14 @@ def main(argv=None) -> int:
     answer = build_answer(origin, run_id, now,
                           args.broker_host, args.broker_port,
                           args.beacon_host, args.beacon_port)
-    path = write_answer(answer)
+    try:
+        path = write_answer(answer, ANSWER_DIR, force=args.force)
+    except FileExistsError:
+        # Only if the file appeared in the second since the check above.
+        print("  The trigger WAS sent, but %s appeared meanwhile and was not\n"
+              "  overwritten. Write down the start time: %s\n"
+              % (path, answer["start_time"]), file=sys.stderr)
+        return 1
     print("  wrote %s\n" % path)
     return 0
 

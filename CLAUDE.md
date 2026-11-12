@@ -32,6 +32,20 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   untouched; new-rule numbers for real captures come from `--pcap-dir` re-conversion.
 - Next: rehearsal_02 on hardware with `--origin esp32-03`, then Step 19 (incident report).
 
+## Status - 12 Nov 2026, rehearsal_02 + Step 18b done
+
+- rehearsal_02 (hardware, esp32-03, first session the Step 18 rules never saw): CORRECT,
+  esp32-03 at 100%, live alert 3 min 54 s after the trigger. The trigger was first sent as
+  `--run rehearsal_01` by mistake; both answer files were repaired by hand - DO NOT change
+  `groundtruth/rehearsal_01.json` or `rehearsal_02.json`. `scenario.py` now refuses (before
+  sending anything) when the answer file exists; `--force` replaces it.
+- Step 18b: C3 counts a rejoin minute only for a DHCP broadcast sent from 0.0.0.0
+  (`detect.REJOIN_NEEDS_UNASSIGNED`; new 9th flow column `src_unassigned`). Rules are now
+  `--rules new|step18|old`. Measured (LIVE_PLAN section 7, "Step 18b"): 14/14 correct (12
+  segments + both rehearsals); rejoin minutes only esp32-02 @11 in rehearsal_01; laptop never
+  flagged; attack-free 0 false alarms, laptop not judged in 2 of 10 (was 7); table1.csv
+  byte-identical. Step 18's tables kept as `*_step18.csv`.
+
 ## Now - final phase, approved 11 Nov 2026
 
 - Deadline: working and rehearsed by Saturday 14 Nov, end of day. Saturday is rehearsal only.
@@ -110,14 +124,14 @@ python -m src.evaluate --runs 30                      # simulated table -> resul
 python -m src.evaluate --rules old --prefix live_batch --label live --runs 12 --out results/table_live.csv
 # real attacks, NEW rule (Step 18; re-converted from the raw captures):
 python -m src.evaluate --prefix live_batch --label live-fixed --runs 12 --pcap-dir pcap/segments --out results/table_live_fixed.csv
-python -m src.evaluate [--rules old] --prefix rehearsal --label rehearsal --runs 1 --pcap-dir pcap/live --out results/table_rehearsal_fixed.csv
+python -m src.evaluate [--rules old|step18] --prefix rehearsal --label rehearsal --runs 2 --pcap-dir pcap/live --out results/table_rehearsal_fixed.csv
 python -m src.evaluate [--rules old] --false-alarms pcap/baseline.pcapng pcap/baseline2.pcapng --out results/false_alarms_fixed.csv
 python -m src.live --session <name> [--replay <pcap>] [--speed 20]   # live engine (Step 15)
 python -m src.live_capture --session <name>          # ADMINISTRATOR terminal: the capture
 python -m src.capture pcap\<file>.pcapng --run <run_id> --baseline 720
 streamlit run dashboard/app.py
 python -m src.listener                                # beacon sink, on the master laptop
-python -m src.scenario --run <run_id> [--origin esp32-02]   # one attack, answer file written
+python -m src.scenario --run <run_id> [--origin esp32-02]   # one attack, answer file written (refuses an existing one; --force)
 ```
 
 ## Known loose ends (not yet fixed)
@@ -128,9 +142,5 @@ python -m src.scenario --run <run_id> [--origin esp32-02]   # one attack, answer
   after the demo (changing them means re-flashing both boards). Do not touch before then.
 - `report.template_brief` always says the attack "spread to other devices", even when one
   device is flagged (10 of the 12 real runs). Fixed in Step 19.
-- Step 18's rejoin rule (C3) cannot tell a DHCP INFORM (laptop-i3, Windows asking for
-  settings) from a real join (DISCOVER/REQUEST), because the flow table has no DHCP message
-  type. The laptop's INFORM minutes are left out and the live page calls them "rejoined".
-  Decide with Muheeb whether to reword the page line or restrict the rule (a measured change).
-- (Fixed: the `capture.endpoint_name` multicast bug in Step 18; the stale "qwen3:4b"
+- (Fixed: Step 18's rejoin rule catching the laptop's DHCP INFORM - Step 18b. the `capture.endpoint_name` multicast bug in Step 18; the stale "qwen3:4b"
   sidebar text and the missing provider choice in Step 17.)
