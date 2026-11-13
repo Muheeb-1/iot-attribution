@@ -1,11 +1,11 @@
 scenario,detector,method,runs,top1_pct,top3_pct,mean_rank,never_ranked,abstention_pct
-live-sessions,as prototype,B1 total bytes,2,0.0,100.0,2.0,0,
-live-sessions,as prototype,B2 anomaly score,2,0.0,100.0,2.0,0,
-live-sessions,as prototype,B3 connection count,2,50.0,100.0,1.5,0,
-live-sessions,as prototype,B4 earliest onset,2,100.0,100.0,1.0,0,
-live-sessions,as prototype,V5 (prototype indicator rule),2,100.0,100.0,1.0,0,0.0
-live-sessions,as prototype,V5 attribution,2,100.0,100.0,1.0,0,0.0
-live-sessions,weighted (fairness check),B1 total bytes,2,0.0,100.0,2.0,0,
-live-sessions,weighted (fairness check),B2 anomaly score,2,0.0,100.0,2.0,0,
-live-sessions,weighted (fairness check),B3 connection count,2,50.0,100.0,1.5,0,
-live-sessions,weighted (fairness check),B4 earliest onset,2,100.0,100.0,1.0,0,
+live-sessions,as prototype,B1 total bytes,6,0.0,100.0,2.0,0,
+live-sessions,as prototype,B2 anomaly score,6,0.0,100.0,2.0,0,
+live-sessions,as prototype,B3 connection count,6,16.7,100.0,1.83,0,
+live-sessions,as prototype,B4 earliest onset,6,100.0,100.0,1.0,0,
+live-sessions,as prototype,V5 (prototype indicator rule),6,100.0,100.0,1.0,0,0.0
+live-sessions,as prototype,V5 attribution,6,100.0,100.0,1.0,0,0.0
+live-sessions,weighted (fairness check),B1 total bytes,6,0.0,100.0,2.0,0,
+live-sessions,weighted (fairness check),B2 anomaly score,6,0.0,100.0,2.0,0,
+live-sessions,weighted (fairness check),B3 connection count,6,16.7,100.0,1.83,0,
+live-sessions,weighted (fairness check),B4 earliest onset,6,100.0,100.0,1.0,0,

@@ -231,6 +231,8 @@ download button). No new dependency. Sections:
   to do if something fails (the fallback ladder), and the measured answer to "why does the
   alert take about four minutes" (section 7).
 - Two full dress rehearsals, then freeze. No code changes after the freeze.
+- **Docs done 13 Nov** (README + `docs/LIVE_DEMO.md`; sessions 01-07 scored, section 7). Git
+  tag `core-locked` marks that commit. Dress rehearsals: still to do.
 
 ### Later - recorded, NOT started (ask Muheeb before starting either)
 
@@ -514,6 +516,46 @@ hardware (`--origin esp32-03`): **correct**.
   5387 %"). Display only; the detector never sees the beacon's contents.
 - Not changed: every earlier table and per-run file (the note column appears only in a set
   that contains a noted session).
+
+13 Nov, Step 20 sessions 03-07 + Step 21 - five more hardware sessions, laptop loop ON in all.
+Checked from the files (answer file, the live engine's meta record, the flow table), not from
+the operator's notes alone; every time the operator reported matches.
+
+| session | origin | trigger | alert | to detect | last beacon | CONTAINED | after alert | V5 |
+|---|---|---|---|---|---|---|---|---|
+| 03 | esp32-02 | 17:12:13 | 17:16:08 | 3:54 (234.3 s) | 17:16:13 | 17:17:43 | 1:36 | 1st, 100% |
+| 04 | esp32-03 | 17:37:03 | 17:40:26 | 3:23 (203.1 s) | 17:40:33 | 17:42:03 | 1:37 | 1st, 100% |
+| 05 | esp32-02 | 18:44:06 | 18:47:53 | 3:47 (227.1 s) | 18:48:06 | 18:49:36 | 1:43 | 1st, 100% |
+| 06 | aborted after 104 s of baseline: 0 beacons, no alert, no answer file - not scored | | | | | | | |
+| 07 | esp32-03 | 19:29:48 | 19:33:27 | 3:39 (218.8 s) | 19:33:19 | 19:34:49 | 1:21 | 1st, 100% |
+
+- Each session: only the attacked board flagged; 7-8 beacons, all from that board, 496 bytes
+  out, 30.0 s apart; 564-601 laptop-i3 flows (loop on). CONTAINED exactly 90 s after the last
+  beacon in each.
+- 05: esp32-02 rejoined (DHCP from 0.0.0.0 at 18:48:25, MQTT at 18:48:26) 19 s after its last
+  beacon - before CONTAINED and before STOP, not only before STOP. No beacon followed (the
+  reboot clears the attack), so CONTAINED is genuine; the rejoin shows in report section 6 as
+  `broadcast:67 (NEW) x1, broker:1883 x1`. Noted "board back on before STOP".
+- 07: the operator reported the first beacon (19:30:19); the trigger was 19:29:48, and
+  time-to-detect is measured from the trigger as for every session. The last beacon came 8.7 s
+  before the alert (the timing file's acted_within_seconds = -8.7): the board was unplugged
+  before its next beacon was due at 19:33:49.
+- 06: new `evaluate.ABORTED_SESSIONS` - a session with no attack is left out of every scored set
+  automatically and printed as "left out (not scored)". (Before, `--runs 7` would have crashed
+  on its missing answer file.) Different from a note: a noted session ran an attack and is scored.
+- Scored: all sessions 6/6 V5 top-1 at 100%, 0 abstained (`results/table_live_sessions.csv`,
+  `--runs 7`); without 02 (laptop loop off) 5/5 (`table_live_sessions_loop_on.csv`, `--runs 7
+  --exclude live_session_02`). Baselines: B4 earliest onset 100%; B3 17% / 0%; B1, B2 0%.
+  These two files replace the 2-session / 1-session versions of Step 22 (a superset, same
+  command with a larger `--runs`; the old figures are in the table above, "Step 22 DONE").
+- Fallback rung 2 with today's recording: `python -m src.live --session <name> --replay
+  pcap/live/live_session_07.pcapng --speed 20` - esp32-03 at 100%, alert +968.9 s and CONTAINED
+  +1050.1 s, identical to the hardware run; all six phases; 1.5 minutes. (Its output was deleted
+  after the check.)
+- Step 21: README.md rewritten (lab, Steps 1-22, every table old vs new, live sessions, live
+  mode); `docs/LIVE_DEMO.md` written (start order, minute by minute, fallback ladder, judge Q&A).
+  `tests/test_step21.py` pins the session figures and checks that every `python -m src.*`
+  command and flag in the two documents exists.
 
 ## 8. Limits to state honestly
 

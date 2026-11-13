@@ -93,6 +93,19 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
 - Listener shows readings as real units (hundredths -> "24.52 C, 53.87 %").
 - Next: more live sessions on hardware (laptop loop ON), then Step 21.
 
+## Status - 13 Nov 2026, Step 21 done, tag `core-locked`
+
+- live_session_03-07 recorded (laptop loop ON). Scored 01-07: 6/6 V5 top-1 at 100%
+  (`results/table_live_sessions.csv`, `--runs 7`), 5/5 without 02. Alerts 3:16-3:54 after
+  the trigger, CONTAINED in every session. 05 noted "board back on before STOP" (rejoined
+  19 s after its last beacon, before CONTAINED; shows in report section 6). 06 ABORTED
+  (no attack, no answer file): `evaluate.ABORTED_SESSIONS` leaves it out of every scored set.
+  Details: LIVE_PLAN section 7, "Step 20 sessions 03-07 + Step 21".
+- README.md is now up to date (Steps 1-22, all tables). `docs/LIVE_DEMO.md` is the demo script
+  (start order, minute by minute, fallback ladder, judge Q&A). `tests/test_step21.py` checks
+  that every command in both documents exists - keep it green when editing them.
+- Next: two dress rehearsals (Saturday), then freeze.
+
 ## Now - final phase, approved 11 Nov 2026
 
 - Deadline: working and rehearsed by Saturday 14 Nov, end of day. Saturday is rehearsal only.

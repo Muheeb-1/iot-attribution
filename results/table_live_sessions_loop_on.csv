@@ -1,11 +1,11 @@
 scenario,detector,method,runs,top1_pct,top3_pct,mean_rank,never_ranked,abstention_pct
-live-sessions (laptop loop on),as prototype,B1 total bytes,1,0.0,100.0,2.0,0,
-live-sessions (laptop loop on),as prototype,B2 anomaly score,1,0.0,100.0,2.0,0,
-live-sessions (laptop loop on),as prototype,B3 connection count,1,0.0,100.0,2.0,0,
-live-sessions (laptop loop on),as prototype,B4 earliest onset,1,100.0,100.0,1.0,0,
-live-sessions (laptop loop on),as prototype,V5 (prototype indicator rule),1,100.0,100.0,1.0,0,0.0
-live-sessions (laptop loop on),as prototype,V5 attribution,1,100.0,100.0,1.0,0,0.0
-live-sessions (laptop loop on),weighted (fairness check),B1 total bytes,1,0.0,100.0,2.0,0,
-live-sessions (laptop loop on),weighted (fairness check),B2 anomaly score,1,0.0,100.0,2.0,0,
-live-sessions (laptop loop on),weighted (fairness check),B3 connection count,1,0.0,100.0,2.0,0,
-live-sessions (laptop loop on),weighted (fairness check),B4 earliest onset,1,100.0,100.0,1.0,0,
+live-sessions (laptop loop on),as prototype,B1 total bytes,5,0.0,100.0,2.0,0,
+live-sessions (laptop loop on),as prototype,B2 anomaly score,5,0.0,100.0,2.0,0,
+live-sessions (laptop loop on),as prototype,B3 connection count,5,0.0,100.0,2.0,0,
+live-sessions (laptop loop on),as prototype,B4 earliest onset,5,100.0,100.0,1.0,0,
+live-sessions (laptop loop on),as prototype,V5 (prototype indicator rule),5,100.0,100.0,1.0,0,0.0
+live-sessions (laptop loop on),as prototype,V5 attribution,5,100.0,100.0,1.0,0,0.0
+live-sessions (laptop loop on),weighted (fairness check),B1 total bytes,5,0.0,100.0,2.0,0,
+live-sessions (laptop loop on),weighted (fairness check),B2 anomaly score,5,0.0,100.0,2.0,0,
+live-sessions (laptop loop on),weighted (fairness check),B3 connection count,5,0.0,100.0,2.0,0,
+live-sessions (laptop loop on),weighted (fairness check),B4 earliest onset,5,100.0,100.0,1.0,0,

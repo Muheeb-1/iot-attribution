@@ -216,12 +216,33 @@ SESSION_NOTES = {
     # session against 614 in live_session_01. The attack and the containment
     # ran as planned; only the noisy innocent device was missing.
     "live_session_02": "laptop loop off",
+    # 13 Nov: esp32-02 was powered off by hand and switched back on 19 s
+    # after its last beacon (DHCP from 0.0.0.0 at 18:48:25, MQTT at 18:48:26),
+    # i.e. before CONTAINED was shown (18:49:36) and before STOP. The reboot
+    # cleared the attack, so no beacon came back and CONTAINED is genuine, but
+    # the rejoin is visible in the report's section 6. Lesson for the demo:
+    # stop the capture before plugging a contained board back in.
+    "live_session_05": "board back on before STOP",
+}
+
+# Sessions that never became an attack: stopped by the operator during the
+# baseline, no trigger sent, so there is no answer file and nothing to score.
+# These are different from a noted session - a noted session ran an attack
+# and is scored; an aborted one has no attack to score at all. Every scored
+# set leaves them out automatically and says so on screen, so "--runs 7"
+# over live_session_01..07 scores six sessions, never crashes on the missing
+# answer file, and never counts the empty session as a detection or a miss.
+ABORTED_SESSIONS = {
+    # 13 Nov: stopped by the operator after 104 s of baseline; scenario.py
+    # refused a mistyped command (as designed), so no attack was ever sent -
+    # 0 beacons in the capture, no alert, no answer file.
+    "live_session_06": "aborted - stopped during baseline, no attack sent",
 }
 
 
 def session_note(run_id: str) -> str:
     """The operator's note for a session ("" if it ran as planned)."""
-    return SESSION_NOTES.get(run_id, "")
+    return SESSION_NOTES.get(run_id, "") or ABORTED_SESSIONS.get(run_id, "")
 
 
 def _clock(epoch) -> str:
@@ -420,7 +441,10 @@ def evaluate_scenario(prefix: str, limit: int | None = None,
     run_ids = runs.list_runs(prefix=prefix)
     if limit is not None:
         run_ids = run_ids[:limit]
-    run_ids = [r for r in run_ids if r not in set(exclude)]
+    for r in run_ids:
+        if r in ABORTED_SESSIONS:
+            print("  left out (not scored): %s - %s" % (r, ABORTED_SESSIONS[r]))
+    run_ids = [r for r in run_ids if r not in set(exclude) and r not in ABORTED_SESSIONS]
     if not run_ids:
         raise FileNotFoundError(
             "no %s_* runs found in data/. Generate them with:\n"

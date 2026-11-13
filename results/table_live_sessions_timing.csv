@@ -1,3 +1,7 @@
 run_id,origin,trigger_clock,alert_device,alert_right,alert_clock,detect_seconds,window_closed_seconds,alert_found_at_stop,last_attack_clock,acted_within_seconds,contained,contained_clock,contained_seconds,contained_device,note
 live_session_01,esp32-02,11:26:49,esp32-02,True,11:30:29,220.3,218.4,False,11:30:49,19.8,True,11:32:19,109.8,esp32-02,
 live_session_02,esp32-03,15:55:11,esp32-03,True,15:58:27,196.5,196.4,False,15:59:11,43.6,True,16:00:41,133.6,esp32-03,laptop loop off
+live_session_03,esp32-02,17:12:13,esp32-02,True,17:16:08,234.3,229.0,False,17:16:13,5.9,True,17:17:43,95.9,esp32-02,
+live_session_04,esp32-03,17:37:03,esp32-03,True,17:40:26,203.1,198.3,False,17:40:33,7.0,True,17:42:03,97.0,esp32-03,
+live_session_05,esp32-02,18:44:06,esp32-02,True,18:47:53,227.1,220.2,False,18:48:06,13.0,True,18:49:36,103.0,esp32-02,board back on before STOP
+live_session_07,esp32-03,19:29:48,esp32-03,True,19:33:27,218.8,215.0,False,19:33:19,-8.7,True,19:34:49,81.3,esp32-03,
