@@ -40,6 +40,9 @@ class Run:
     capture_seconds: int = 6 * 3600
     baseline_seconds: int = 3 * 3600
     baseline_windows: int = 180
+    # The run this one is a fresh conversion of (same capture, newer rules),
+    # or None. Written by src/reconvert.py; see replay_runs() below.
+    replaces: str | None = None
 
     def __len__(self) -> int:
         return len(self.connections)
@@ -66,6 +69,44 @@ def list_runs(prefix: str | None = None, data_dir: Path = DATA_DIR) -> list[str]
     """
     pattern = "%s_*.parquet" % prefix if prefix else "*.parquet"
     return sorted(p.stem for p in Path(data_dir).glob(pattern))
+
+
+def replaced_by(data_dir: Path = DATA_DIR) -> dict:
+    """
+    {old run id: new run id} for every run that has been re-converted.
+
+    Why this exists (13 Nov, fallback rung 3): the twelve live_batch runs and
+    rehearsal_01 were saved before Step 18, under the old naming rule. The
+    replay page analyses every run under today's rules, and on those old
+    tables it named the right board in only 4 of 12 batch runs (and blamed
+    laptop-i3 for rehearsal_01). They cannot simply be re-written in place:
+    `evaluate.py --rules old` reproduces the published table_live.csv from
+    exactly those saved files. So src/reconvert.py converts each capture
+    again into a NEW run id and writes "replaces": "<old id>" into the new
+    run's meta file. The old files stay byte-for-byte as they were.
+    """
+    links = {}
+    for meta_file in sorted(Path(data_dir).glob("*.meta.json")):
+        try:
+            meta = json.loads(meta_file.read_text(encoding="utf-8"))
+        except (OSError, ValueError):
+            continue
+        old = meta.get("replaces")
+        if old:
+            links[old] = meta.get("run_id", meta_file.name[:-len(".meta.json")])
+    return links
+
+
+def replay_runs(data_dir: Path = DATA_DIR) -> list[str]:
+    """
+    The runs the replay page offers: every run, minus the ones that have been
+    replaced by a fresh conversion. A replaced run is still on disk and still
+    scored by evaluate.py; it is only kept out of the demo list, because the
+    page would analyse an old-rule table with today's rules and could show a
+    wrong board.
+    """
+    hidden = set(replaced_by(data_dir))
+    return [r for r in list_runs(data_dir=data_dir) if r not in hidden]
 
 
 def load_run(run_id: str, data_dir: Path = DATA_DIR) -> Run:
@@ -96,4 +137,5 @@ def load_run(run_id: str, data_dir: Path = DATA_DIR) -> Run:
         capture_seconds=int(meta["capture_seconds"]),
         baseline_seconds=int(meta["baseline_seconds"]),
         baseline_windows=int(meta["baseline_windows"]),
+        replaces=meta.get("replaces"),
     )

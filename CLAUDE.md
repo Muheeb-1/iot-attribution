@@ -53,6 +53,24 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   the board's packets cut - the first real containment is the next hardware run.
 - Next: Step 20 (fresh sessions, contain by hand, wait for CONTAINED), then Step 21.
 
+## Status - 13 Nov 2026, Step 20a + fallback rung 3
+
+- Step 20a: `live_session_01` on hardware (`--origin esp32-02`) is CORRECT - esp32-02 at
+  100%, alert 3 min 40 s after the trigger, and the FIRST real containment (board powered
+  off by hand): CONTAINED 90 s after the last beacon. Nothing odd. `evaluate.py` now has a
+  `live_timing` table (`<out>_timing.csv`) that reads the live engine's own record + the
+  trigger time; no existing output changes. Details: LIVE_PLAN section 7, "Step 20a".
+- Fallback rung 3 FIXED (the old DEMO RISK): `src/reconvert.py` re-converts the 12
+  `live_batch_*` and `rehearsal_01` captures under today's rules into new `lab_*` runs
+  (meta `"replaces"`); `runs.replay_runs()` hides the replaced originals. The replay page's
+  13 real captures now all name the right board at 100% (was 4/12 + rehearsal_01 wrong).
+  Old files untouched; `--rules old`/`step18` still reproduce `table_live.csv` and the
+  `*_step18.csv` tables byte-for-byte. Run `python -m src.reconvert` once on a machine with
+  the pcaps (writes only gitignored `data/`).
+- Tests: full suite green with the new `test_step20.py` (replay list + live timings).
+- Next: Step 22 (realistic beacon payload) is prepared next; then Step 21 (README +
+  LIVE_DEMO.md) and the dress rehearsals.
+
 ## Now - final phase, approved 11 Nov 2026
 
 - Deadline: working and rehearsed by Saturday 14 Nov, end of day. Saturday is rehearsal only.
@@ -125,7 +143,7 @@ published numbers and stay untouched.
 ```
 .venv\Scripts\activate
 python -m src.generate --runs 30 ; python -m src.generate --runs 30 --easy   # test data
-python -m pytest                                      # 458 passed, 6 skipped expected
+python -m pytest                                      # all pass, 6 skipped expected (was 458 + Step 20/22 tests)
 python -m src.evaluate --runs 30                      # simulated table -> results/table1.csv
 # real attacks, OLD rule (the published table_live.csv, from the saved runs):
 python -m src.evaluate --rules old --prefix live_batch --label live --runs 12 --out results/table_live.csv
@@ -133,6 +151,9 @@ python -m src.evaluate --rules old --prefix live_batch --label live --runs 12 --
 python -m src.evaluate --prefix live_batch --label live-fixed --runs 12 --pcap-dir pcap/segments --out results/table_live_fixed.csv
 python -m src.evaluate [--rules old|step18] --prefix rehearsal --label rehearsal --runs 2 --pcap-dir pcap/live --out results/table_rehearsal_fixed.csv
 python -m src.evaluate [--rules old] --false-alarms pcap/baseline.pcapng pcap/baseline2.pcapng --out results/false_alarms_fixed.csv
+# live sessions (Step 20): also writes <out>_timing.csv (to-detect / contained, needs the live meta + answer):
+python -m src.evaluate --prefix live_session --label live-sessions --runs <N> --out results/table_live_sessions.csv
+python -m src.reconvert                               # fallback rung 3: re-convert the real captures into lab_* runs (needs the pcaps)
 python -m src.live --session <name> [--replay <pcap>] [--speed 20]   # live engine (Step 15)
 python -m src.live_capture --session <name>          # ADMINISTRATOR terminal: the capture
 python -m src.incident <run_id> [--pcap <file>] [--llm local|cloud]   # full report -> reports/<run_id>.html
@@ -148,12 +169,8 @@ python -m src.scenario --run <run_id> [--origin esp32-02]   # one attack, answer
   connection ids cited beside it (found in Step 14).
 - Firmware has the Wi-Fi credentials hardcoded in a tracked, public file. Deferred until
   after the demo (changing them means re-flashing both boards). Do not touch before then.
-- DEMO RISK (since Step 18, measured 12 Nov): the saved `data/live_batch_*` and
-  `data/rehearsal_01` runs were converted under the OLD naming rule (no C1). The replay page
-  analyses them as saved under the NEW rules (C2 without C1), and names the right board in
-  only 4 of 12 live_batch runs (live_batch_05 and rehearsal_01: laptop-i3; 7 abstain).
-  `data/rehearsal_02` (saved by the live engine, new rules) is correct. Fix needs Muheeb's
-  decision: e.g. re-convert the captures into NEW run ids (data/ originals untouched).
 - (Fixed: the template's "spread to other devices" wording - Step 19. Step 18's rejoin rule
   catching the laptop's DHCP INFORM - Step 18b. the `capture.endpoint_name` multicast bug in Step 18; the stale "qwen3:4b"
-  sidebar text and the missing provider choice in Step 17.)
+  sidebar text and the missing provider choice in Step 17. The replay-page DEMO RISK - old-rule
+  `live_batch_*`/`rehearsal_01` runs named the wrong board - Step 20a fallback rung 3: re-converted
+  into `lab_*` runs by `src/reconvert.py`, the old files kept for `--rules old`.)

@@ -393,7 +393,11 @@ def test_with_no_session_at_all_the_page_shows_how_to_start_one(tmp_path):
     at = render(tmp_path / "empty")
     assert not at.exception
     assert "Waiting for a session" in texts(at)
-    assert "python -m src.live_capture --session live_session_01" in at.code[0].value
+    # The exact NN is whichever live_session_ is free in the real data/ folder
+    # (once live_session_01 has been recorded it is live_session_02, and so on);
+    # next_session_name's numbering is pinned hermetically in its own test above.
+    # Here we only check that the admin capture command is shown, naming a session.
+    assert "python -m src.live_capture --session live_session_" in at.code[0].value
 
 
 def test_following_the_newest_session_picks_it_up(tmp_path):

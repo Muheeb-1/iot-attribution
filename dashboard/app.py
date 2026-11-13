@@ -311,8 +311,30 @@ def load_answer_for_display(run_id: str):
     """
     path = ROOT / "groundtruth" / ("%s.json" % run_id)
     if not path.exists():
-        return None
+        # A re-converted run (lab_batch_05) is the same capture as the run it
+        # replaces (live_batch_05), so it shares that run's answer file.
+        replaces = replaced_run(run_id)
+        if not replaces:
+            return None
+        path = ROOT / "groundtruth" / ("%s.json" % replaces)
+        if not path.exists():
+            return None
     return json.loads(path.read_text(encoding="utf-8"))
+
+
+def replaced_run(run_id: str):
+    """The run this one is a fresh conversion of (src/reconvert.py), or None."""
+    try:
+        meta = json.loads(runs.meta_path(run_id).read_text(encoding="utf-8"))
+    except (OSError, ValueError):
+        return None
+    return meta.get("replaces")
+
+
+def run_label(run_id: str, came_from: dict) -> str:
+    """What the run picker shows: the id, plus where a re-converted run came from."""
+    old = came_from.get(run_id)
+    return "%s  (= %s, today's rules)" % (run_id, old) if old else run_id
 
 
 def ollama_is_awake(timeout: float = 1.5) -> bool:
@@ -399,7 +421,11 @@ def replay_page() -> None:
     st.caption("Which device did the attack start from - and what should be "
                "done about it?")
 
-    available = runs.list_runs()
+    # Runs that a fresh conversion has replaced are hidden here (they were
+    # saved under the pre-Step-18 rules and this page analyses with today's);
+    # they stay on disk for evaluate.py. See runs.replay_runs.
+    available = runs.replay_runs()
+    came_from = {new: old for old, new in runs.replaced_by().items()}
     if not available:
         st.error("No captures found in `data/`.")
         st.code("python -m src.generate --runs 30\n"
@@ -411,7 +437,8 @@ def replay_page() -> None:
         st.header("Capture")
         run_id = st.selectbox("Which incident?", available,
                               index=available.index("run_000")
-                              if "run_000" in available else 0)
+                              if "run_000" in available else 0,
+                              format_func=lambda r: run_label(r, came_from))
 
         st.header("Who writes the brief")
         writer = st.radio(

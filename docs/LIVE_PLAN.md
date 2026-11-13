@@ -240,7 +240,6 @@ download button). No new dependency. Sections:
   comparable. Needs re-flashing both boards (`firmware/sensor/sensor.ino`) - do it together
   with the deferred Wi-Fi-credentials change, after the demo. Re-measure: the 12-capture
   numbers will not transfer automatically.
-
 **Step 23 - a visual redesign of the dashboard**
 - Layout, colours and typography of the replay and live pages. Presentation only: no change
   to what is computed or shown as evidence; the AppTest render tests must stay green.
@@ -389,6 +388,46 @@ on (as measured above); new = C1-C3 + C3b. All from the raw captures (`--pcap-di
   byte-identical (`detect.baseline_reference` is a pure extraction of robust_scores' maths).
 
 Not testable off the laptop: live capture through Npcap (Step 16a, first day).
+
+13 Nov, Step 20a - `live_session_01` on hardware (`--origin esp32-02`), the first session with
+a REAL containment (board powered off by hand, not packets cut in a replay): **correct**.
+- esp32-02 named at 100%; laptop-i3 never flagged; no rejoin minutes. Trigger 11:26:49,
+  INCIDENT 11:30:29 = **3 min 40 s** to the alert (220.3 s; the third abnormal minute closed
+  at 218.4 s). In line with the ~4 min-by-design figure (rehearsal_02 was 3 min 54 s).
+- Containment: the operator pulled the board ~20 s after the alert (last beacon 11:30:49);
+  CONTAINED shown 11:32:19, exactly 90 s after that last beacon. This is the first time the
+  Step 19 CONTAINED check has confirmed a real containment - until now it was only tested by
+  removing packets from a replay. The verdict stayed esp32-02; phases ran
+  WAITING -> LEARNING -> MONITORING -> INCIDENT -> CONTAINED -> STOPPED.
+- Nothing odd. Scored with the new `evaluate.py` timing table (below).
+- New in evaluate.py (Step 20): `live_timing` reads the live engine's own record of what it
+  did (meta "live": first_alert, containment) and the answer file's trigger time - the one
+  place allowed both - and prints "to detect / contained / after alert" per session, saved
+  as `<out>_timing.csv`. No existing output changes (only live-engine runs have a "live"
+  block). Reproduce: `python -m src.evaluate --prefix live_session --label live-sessions
+  --runs 1 --out results/table_live_sessions.csv`.
+
+13 Nov, fallback rung 3 fixed - the replay page now names the right board on every real
+capture. The twelve `live_batch_*` runs and `rehearsal_01` in `data/` were converted before
+Step 18 (old naming rule, no `src_unassigned`); the replay page analyses with today's rules,
+so it was right on only 4 of the 12 batch runs and blamed laptop-i3 for rehearsal_01.
+- `src/reconvert.py` converts each raw capture again under today's rules into a NEW run id
+  (`live_batch_NN` -> `lab_batch_NN`, `rehearsal_01` -> `lab_rehearsal_01`), writing
+  `"replaces": "<old id>"` into the new meta. `runs.replay_runs()` lists the new runs and
+  hides the ones they replace; the old files are untouched. Run once:
+  `python -m src.reconvert` (writes only gitignored `data/`).
+- Measured after: the replay page's real captures (13 of them: 12 lab_batch + lab_rehearsal_01,
+  plus live_session_01, rehearsal_02, live_test_01/02) all name the right board at 100%,
+  0 abstain, 0 wrong (was 4/12 correct + rehearsal_01 wrong). A re-converted run is scored
+  against the answer of the run it replaces (`evaluate.load_answer_for_run`) - one answer
+  file per attack, never a copy. `lab_batch_NN`'s per-run V5/confidence/flagged equal
+  `table_live_fixed_per_run.csv` (same packets, same rules).
+- Nothing published moved: `--rules old` still rebuilds `table_live.csv`, and `--rules
+  step18 --pcap-dir` still rebuilds `table_live_step18.csv`, `table_rehearsal_step18.csv`
+  and `false_alarms_step18.csv`, all byte-for-byte. The new prefix is `lab_`, deliberately
+  not `live_batch`/`rehearsal`, so `--prefix` still scores exactly the old twelve.
+  (`table_live_per_run.csv` on disk predates the Step-18 record columns and already differed
+  before this change - not reproduced here and not relied on.)
 
 ## 8. Limits to state honestly
 

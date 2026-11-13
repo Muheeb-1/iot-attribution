@@ -183,6 +183,106 @@ def load_answer(run_id: str, groundtruth_dir: Path = GROUNDTRUTH_DIR) -> dict:
     return json.loads(path.read_text(encoding="utf-8"))
 
 
+def load_answer_for_run(run: runs.Run, groundtruth_dir: Path = GROUNDTRUTH_DIR) -> dict:
+    """
+    The answer for a loaded run. A run re-converted by src/reconvert.py
+    (lab_batch_05, say) is the same capture as the run it replaces
+    (live_batch_05), so it has the same answer: its own file is used if one
+    exists, otherwise the replaced run's. One answer file per attack, never a
+    copy that could drift out of step with it.
+    """
+    own = Path(groundtruth_dir) / ("%s.json" % run.run_id)
+    if own.exists() or not run.replaces:
+        return load_answer(run.run_id, groundtruth_dir)
+    return load_answer(run.replaces, groundtruth_dir)
+
+
+# --------------------------------------------------------------------------
+# Live sessions: how fast, and was it contained (Step 20)
+# --------------------------------------------------------------------------
+# The live engine writes what it did into the run's meta file at STOP
+# ("live": first_alert, containment). It cannot know when the attack really
+# started - that is in the answer file - so "time to detect" is worked out
+# here, the one place allowed to read both.
+
+def _clock(epoch) -> str:
+    """Wall-clock time on this machine (the lab laptop runs on IST)."""
+    from datetime import datetime
+    return datetime.fromtimestamp(epoch).strftime("%H:%M:%S") if epoch else ""
+
+
+def live_timing(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR):
+    """
+    One row of timings for a session recorded by the live engine, or None
+    for a run that was not (no "live" block in its meta file).
+
+    detect_seconds        trigger sent -> alert raised (the operator's view)
+    window_closed_seconds trigger sent -> the third abnormal minute closed
+                          (what the detector could do with zero file delay)
+    acted_within_seconds  alert raised -> the attacker's last connection: how
+                          long the operator took to contain, at most
+    contained_seconds     alert raised -> CONTAINED shown (that, plus the 90 s
+                          of silence the check waits for)
+    """
+    meta_file = runs.meta_path(run_id) if data_dir is None else runs.meta_path(run_id, data_dir)
+    meta = json.loads(Path(meta_file).read_text(encoding="utf-8"))
+    live = meta.get("live")
+    if not live:
+        return None
+    answer_id = run_id
+    if not (Path(groundtruth_dir) / ("%s.json" % run_id)).exists() and meta.get("replaces"):
+        answer_id = meta["replaces"]
+    answer = load_answer(answer_id, groundtruth_dir)
+    origin = answer["origin"]
+    trigger = answer.get("start_epoch") or answer.get("true_onset_epoch", {}).get(origin)
+
+    alert = live.get("first_alert") or {}
+    contain = live.get("containment") or {}
+    raised = alert.get("raised_epoch")
+    contained_at = contain.get("contained_epoch") if contain.get("contained") else None
+    last_seen = contain.get("last_seen_epoch")
+
+    def gap(later, earlier):
+        return round(later - earlier, 1) if later and earlier else None
+
+    return {
+        "run_id": run_id,
+        "origin": origin,
+        "trigger_clock": _clock(trigger),
+        "alert_device": alert.get("device", ""),
+        "alert_right": bool(alert) and alert.get("device") == origin,
+        "alert_clock": _clock(raised),
+        "detect_seconds": gap(raised, trigger),
+        "window_closed_seconds": gap(alert.get("closed_epoch"), trigger),
+        "alert_found_at_stop": bool(alert.get("found_at_stop", False)),
+        "last_attack_clock": _clock(last_seen),
+        "acted_within_seconds": gap(last_seen, raised) if contained_at else None,
+        "contained": bool(contained_at),
+        "contained_clock": _clock(contained_at),
+        "contained_seconds": gap(contained_at, raised),
+        "contained_device": contain.get("device", "") if contained_at else "",
+    }
+
+
+def print_timing(rows: list) -> None:
+    def mmss(seconds):
+        if seconds is None:
+            return "-"
+        return "%d min %02d s" % divmod(int(round(seconds)), 60)
+
+    print("\n  LIVE SESSIONS - what the live engine did, timed against the trigger")
+    print("  %-17s %-9s %-9s %-10s %-9s %13s %10s %13s"
+          % ("session", "origin", "trigger", "alert on", "at", "to detect",
+             "contained", "after alert"))
+    print("  " + "-" * 98)
+    for r in rows:
+        print("  %-17s %-9s %-9s %-10s %-9s %13s %10s %13s"
+              % (r["run_id"], r["origin"], r["trigger_clock"],
+                 (r["alert_device"] or "none") + ("" if r["alert_right"] else " (X)"),
+                 r["alert_clock"] or "-", mmss(r["detect_seconds"]),
+                 r["contained_clock"] or "no", mmss(r["contained_seconds"])))
+
+
 def rank_of(ranking, device) -> int:
     """Where the device came in the ranking, or 99 if it is not in it at all."""
     return ranking.index(device) + 1 if device in ranking else NOT_RANKED
@@ -225,7 +325,7 @@ def evaluate_one(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR,
     )
 
     # ---- the answer sheet is opened here, and nowhere else ----
-    answer = load_answer(run_id, groundtruth_dir)
+    answer = load_answer_for_run(run, groundtruth_dir)
     origin = answer["origin"]
 
     plain_baselines = attribute.baseline_rankings(run.connections, plain, run.device_names)
@@ -487,6 +587,7 @@ def main(argv=None) -> int:
 
     all_rows = []
     all_records = []
+    timing_rows = []
 
     scenarios = []
     if args.prefix:
@@ -562,6 +663,14 @@ def main(argv=None) -> int:
             })
         all_records.extend(records)
 
+        # Only runs saved by the live engine have timings; for every other set
+        # this is empty and no timing file is written, so no existing output
+        # changes.
+        timed = [t for t in (live_timing(r["run_id"]) for r in records) if t]
+        if timed:
+            print_timing(timed)
+            timing_rows.extend(timed)
+
     table = pd.DataFrame(all_rows)[
         ["scenario", "detector", "method", "runs", "top1_pct", "top3_pct",
          "mean_rank", "never_ranked", "abstention_pct"]
@@ -577,7 +686,12 @@ def main(argv=None) -> int:
     pd.DataFrame(all_records).to_csv(per_run_path, index=False)
 
     print("\n  saved: %s" % out_path)
-    print("  saved: %s  (one row per run, for checking individual cases)\n" % per_run_path)
+    print("  saved: %s  (one row per run, for checking individual cases)" % per_run_path)
+    if timing_rows:
+        timing_path = out_path.with_name("%s_timing.csv" % out_path.stem)
+        pd.DataFrame(timing_rows).to_csv(timing_path, index=False)
+        print("  saved: %s  (live engine timings)" % timing_path)
+    print()
     return 0
 
 
