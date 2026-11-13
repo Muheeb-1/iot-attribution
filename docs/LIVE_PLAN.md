@@ -240,6 +240,36 @@ download button). No new dependency. Sections:
   comparable. Needs re-flashing both boards (`firmware/sensor/sensor.ino`) - do it together
   with the deferred Wi-Fi-credentials change, after the demo. Re-measure: the 12-capture
   numbers will not transfer automatically.
+- **Code done 13 Nov (not flashed).** The firmware and `src/listener.py` are changed and
+  tested; nothing on the boards has changed. See section 7, "Step 22 PREPARED".
+
+- **Exact re-flash steps for tomorrow (esp32-02 and esp32-03).** Do one board at a time.
+  The ONLY line that differs between boards is `#define DEVICE_ID`.
+  0. Before you start, note: flashing wipes the running board. If you have a capture in
+     progress, stop it first. You do NOT need to change the Wi-Fi lines unless the network
+     changed - `WIFI_SSID` / `WIFI_PASS` stay as they are.
+  1. Open the Arduino IDE. File -> Open -> `firmware/sensor/sensor.ino`.
+  2. Make sure the ESP32 core is installed (Tools -> Board -> "esp32" by Espressif). It
+     already is on the lab laptop from the first flashing.
+  3. Plug esp32-02 into USB. Tools -> Board -> your ESP32 model (the same one you used
+     before, e.g. "ESP32 Dev Module"). Tools -> Port -> the COM port that just appeared
+     (unplug/replug to see which one it is).
+  4. In the code set the identity line to the board you are flashing:
+     `#define DEVICE_ID   "esp32-02"`  (line ~90). Leave TARGET_IP / BROKER / timings alone.
+  5. Click Upload (the right-arrow button). If it stalls at "Connecting....", hold the
+     board's BOOT button until it starts writing, then release. Wait for "Done uploading".
+  6. Open Tools -> Serial Monitor, set it to 115200 baud. You should see `[boot] device
+     "esp32-02"`, then `[wifi] connected`, `[mqtt] connected`, and `[pub]` lines every 10 s.
+  7. Unplug esp32-02. Plug in esp32-03, change the line to `#define DEVICE_ID "esp32-03"`,
+     re-pick Tools -> Port, and repeat steps 5-6. Confirm the serial log says `"esp32-03"`.
+  8. Sanity-check the new beacon before a real run: on the laptop run `python -m
+     src.listener`, then from another terminal send `attack` on `ctrl/esp32-02` (the normal
+     trigger). The listener should print "attacker received:" blocks cycling 1/3, 2/3, 3/3
+     with the board's real MAC/IP/SSID-name and readings - and NO password. Send `stop`.
+  9. Then Step 22 proper: one fresh capture through the live engine, confirm the beacon is
+     still ~200 bytes every 30 s on the wire and the verdict is unchanged, and re-measure
+     the tables from the new captures (the old 12 were the old payload).
+
 **Step 23 - a visual redesign of the dashboard**
 - Layout, colours and typography of the replay and live pages. Presentation only: no change
   to what is computed or shown as evidence; the AppTest render tests must stay green.
@@ -428,6 +458,24 @@ so it was right on only 4 of the 12 batch runs and blamed laptop-i3 for rehearsa
   not `live_batch`/`rehearsal`, so `--prefix` still scores exactly the old twelve.
   (`table_live_per_run.csv` on disk predates the Step-18 record columns and already differed
   before this change - not reproduced here and not relied on.)
+
+13 Nov, Step 22 PREPARED (not flashed) - the realistic beacon payload.
+- The beacon now carries what malware on the board could really read: id, MAC, IP, gateway,
+  Wi-Fi network NAME (never the password - `WIFI_PASS` is not formatted anywhere in the
+  beacon code), signal, broker, MQTT client id and topics, uptime, free heap, and the last
+  four sensor readings. JSON, padded with spaces to a fixed 200 bytes. It is MORE than fits
+  in one packet, so successive beacons ROTATE part 1/3 -> 2/3 -> 3/3: still one ~200-byte
+  connection every 30 s, so the detector's inputs (counts, sizes, timing) are unchanged.
+- Why detection is unaffected, confirmed: `capture.TSHARK_FIELDS` has no payload field and
+  `capture.FLOW_COLUMNS` has no column for contents, so what a beacon SAYS has nowhere to
+  enter the pipeline. Verified on a real replay: `live_session_01`'s flow table is exactly
+  those nine columns; the seven features are addresses/counts/sizes/timing only
+  (`tests/test_step22.py`). The firmware guard checks it still beacons once per 30 s with a
+  single connection, only rotating the part.
+- `src/listener.py` shows each beacon as a readable "attacker received:" block, keeps a
+  per-board profile, and prints everything collected at Ctrl+C. Old test-firmware beacons
+  and non-JSON still display. NOT YET MEASURED on hardware: the board is re-flashed tomorrow
+  (Step 22 proper), then one capture must confirm the 200-byte / 30-s shape on the wire.
 
 ## 8. Limits to state honestly
 

@@ -53,7 +53,7 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   the board's packets cut - the first real containment is the next hardware run.
 - Next: Step 20 (fresh sessions, contain by hand, wait for CONTAINED), then Step 21.
 
-## Status - 13 Nov 2026, Step 20a + fallback rung 3
+## Status - 13 Nov 2026, Step 20a + fallback rung 3 + Step 22 prepared
 
 - Step 20a: `live_session_01` on hardware (`--origin esp32-02`) is CORRECT - esp32-02 at
   100%, alert 3 min 40 s after the trigger, and the FIRST real containment (board powered
@@ -67,9 +67,18 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   Old files untouched; `--rules old`/`step18` still reproduce `table_live.csv` and the
   `*_step18.csv` tables byte-for-byte. Run `python -m src.reconvert` once on a machine with
   the pcaps (writes only gitignored `data/`).
-- Tests: full suite green with the new `test_step20.py` (replay list + live timings).
-- Next: Step 22 (realistic beacon payload) is prepared next; then Step 21 (README +
-  LIVE_DEMO.md) and the dress rehearsals.
+- Step 22 PREPARED, NOT FLASHED: `firmware/sensor/sensor.ino` beacon now carries real
+  stolen-looking data (id, MAC, IP, gateway, Wi-Fi NAME only, signal, broker, topics,
+  uptime, heap, last 4 readings), JSON padded to 200 bytes, ROTATING part 1/3->2/3->3/3 so
+  it stays one 200-byte connection every 30 s - detector inputs unchanged (no payload in
+  `TSHARK_FIELDS`/`FLOW_COLUMNS`; confirmed on the live_session_01 replay and in
+  `tests/test_step22.py`). `src/listener.py` prints each beacon as an "attacker received:"
+  block + a per-board profile. Exact Arduino re-flash steps for esp32-02/03: LIVE_PLAN
+  section 5, Step 22. Boards still run the OLD firmware until flashed tomorrow.
+- Tests: full suite green with the new `test_step20.py` (replay list + live timings) and
+  `test_step22.py` (listener + firmware shape). Do not re-run the boards' numbers yet.
+- Next: re-flash tomorrow (Step 22 proper, re-measure from fresh captures), then Step 21
+  (README + LIVE_DEMO.md) and the dress rehearsals.
 
 ## Now - final phase, approved 11 Nov 2026
 
@@ -169,6 +178,7 @@ python -m src.scenario --run <run_id> [--origin esp32-02]   # one attack, answer
   connection ids cited beside it (found in Step 14).
 - Firmware has the Wi-Fi credentials hardcoded in a tracked, public file. Deferred until
   after the demo (changing them means re-flashing both boards). Do not touch before then.
+  (Step 22's beacon sends the Wi-Fi network NAME but never the password - still deferred.)
 - (Fixed: the template's "spread to other devices" wording - Step 19. Step 18's rejoin rule
   catching the laptop's DHCP INFORM - Step 18b. the `capture.endpoint_name` multicast bug in Step 18; the stale "qwen3:4b"
   sidebar text and the missing provider choice in Step 17. The replay-page DEMO RISK - old-rule
