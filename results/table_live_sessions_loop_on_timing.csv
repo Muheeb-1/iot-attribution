@@ -1,0 +1,2 @@
+run_id,origin,trigger_clock,alert_device,alert_right,alert_clock,detect_seconds,window_closed_seconds,alert_found_at_stop,last_attack_clock,acted_within_seconds,contained,contained_clock,contained_seconds,contained_device,note
+live_session_01,esp32-02,11:26:49,esp32-02,True,11:30:29,220.3,218.4,False,11:30:49,19.8,True,11:32:19,109.8,esp32-02,

@@ -205,6 +205,25 @@ def load_answer_for_run(run: runs.Run, groundtruth_dir: Path = GROUNDTRUTH_DIR) 
 # started - that is in the answer file - so "time to detect" is worked out
 # here, the one place allowed to read both.
 
+# What went differently in a session, written down by the operator - shown
+# beside the session in every scored table, so a result is never quoted
+# without its conditions. A note never removes a session: it is scored like
+# any other, and `--exclude` gives the "without it" figures side by side.
+# Add a line here for any session that did not run as planned.
+SESSION_NOTES = {
+    # 13 Nov: the operator's Enter key did not register, so laptop-i3's
+    # 2-second connect/disconnect loop never started - 22 laptop flows in the
+    # session against 614 in live_session_01. The attack and the containment
+    # ran as planned; only the noisy innocent device was missing.
+    "live_session_02": "laptop loop off",
+}
+
+
+def session_note(run_id: str) -> str:
+    """The operator's note for a session ("" if it ran as planned)."""
+    return SESSION_NOTES.get(run_id, "")
+
+
 def _clock(epoch) -> str:
     """Wall-clock time on this machine (the lab laptop runs on IST)."""
     from datetime import datetime
@@ -261,6 +280,7 @@ def live_timing(run_id: str, data_dir=None, groundtruth_dir=GROUNDTRUTH_DIR):
         "contained_clock": _clock(contained_at),
         "contained_seconds": gap(contained_at, raised),
         "contained_device": contain.get("device", "") if contained_at else "",
+        "note": session_note(run_id),
     }
 
 
@@ -280,7 +300,8 @@ def print_timing(rows: list) -> None:
               % (r["run_id"], r["origin"], r["trigger_clock"],
                  (r["alert_device"] or "none") + ("" if r["alert_right"] else " (X)"),
                  r["alert_clock"] or "-", mmss(r["detect_seconds"]),
-                 r["contained_clock"] or "no", mmss(r["contained_seconds"])))
+                 r["contained_clock"] or "no", mmss(r["contained_seconds"]))
+              + ("   [%s]" % r["note"] if r.get("note") else ""))
 
 
 def rank_of(ranking, device) -> int:
@@ -388,11 +409,18 @@ def summarise(records: list, methods: list) -> pd.DataFrame:
 
 def evaluate_scenario(prefix: str, limit: int | None = None,
                       groundtruth_dir=GROUNDTRUTH_DIR, verbose: bool = False,
-                      pcap_dir=None) -> tuple:
-    """Score every saved run with the given file prefix ('run' or 'easy')."""
+                      pcap_dir=None, exclude=()) -> tuple:
+    """
+    Score every saved run with the given file prefix ('run' or 'easy').
+
+    `exclude` leaves the named runs out AFTER the first `limit` are taken, so
+    "--runs 2 --exclude live_session_02" is the same two sessions minus that
+    one - the "without it" figure beside the full one, never a different set.
+    """
     run_ids = runs.list_runs(prefix=prefix)
     if limit is not None:
         run_ids = run_ids[:limit]
+    run_ids = [r for r in run_ids if r not in set(exclude)]
     if not run_ids:
         raise FileNotFoundError(
             "no %s_* runs found in data/. Generate them with:\n"
@@ -403,6 +431,10 @@ def evaluate_scenario(prefix: str, limit: int | None = None,
     records = []
     for i, run_id in enumerate(run_ids, 1):
         record = evaluate_one(run_id, groundtruth_dir=groundtruth_dir, pcap_dir=pcap_dir)
+        # The operator's note rides along only when the set has one, so the
+        # per-run files of every earlier table are unchanged.
+        if session_note(run_id):
+            record["note"] = session_note(run_id)
         records.append(record)
         if verbose:
             print("    %-10s origin %-11s V5 rank %-3s conf %3.0f%%  %s"
@@ -558,6 +590,10 @@ def main(argv=None) -> int:
                         help="session length for --false-alarms (default 25)")
     parser.add_argument("--baseline", type=int, default=720,
                         help="baseline seconds for --false-alarms (default 720)")
+    parser.add_argument("--exclude", nargs="+", default=(), metavar="RUN",
+                        help="leave these runs out of the scored set (after --runs is "
+                             "applied) - to report a set with and without a session that "
+                             "ran differently, e.g. --exclude live_session_02")
     args = parser.parse_args(argv)
 
     set_rules(args.rules)
@@ -605,8 +641,14 @@ def main(argv=None) -> int:
     for label, prefix, expected1, expected3 in scenarios:
         print("\n  scoring %s runs..." % label)
         records, summary, fair = evaluate_scenario(
-            prefix, limit=args.runs, verbose=args.verbose, pcap_dir=args.pcap_dir
+            prefix, limit=args.runs, verbose=args.verbose, pcap_dir=args.pcap_dir,
+            exclude=args.exclude,
         )
+        if args.exclude:
+            print("  left out: %s" % " ".join(args.exclude))
+        noted = [r for r in records if r.get("note")]
+        for r in noted:
+            print("  note: %s - %s" % (r["run_id"], r["note"]))
 
         n = len(records)
         relayed = sum(1 for r in records if r["via_broker"])

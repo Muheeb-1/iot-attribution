@@ -80,6 +80,19 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
 - Next: re-flash tomorrow (Step 22 proper, re-measure from fresh captures), then Step 21
   (README + LIVE_DEMO.md) and the dress rehearsals.
 
+## Status - 13 Nov 2026, Step 22 done
+
+- Both boards run the Step 22 firmware. `live_session_02` (`--origin esp32-03`): CORRECT,
+  esp32-03 at 100%, alert 3 min 16 s after the trigger, CONTAINED 90 s after the last beacon
+  (board unplugged). Beacon on the wire unchanged: 496 bytes every 30 s, same as the old one.
+- CAVEAT: laptop-i3's loop was OFF in live_session_02 (22 laptop flows vs 614 in session 01).
+  Kept, labelled "laptop loop off" in `evaluate.SESSION_NOTES`; `evaluate.py --exclude RUN`
+  scores the same set without it. Both tables: `results/table_live_sessions.csv` (2/2 top-1)
+  and `results/table_live_sessions_loop_on.csv` (1/1). Add a note there for any future
+  session that does not run as planned. Details: LIVE_PLAN section 7, "Step 22 DONE".
+- Listener shows readings as real units (hundredths -> "24.52 C, 53.87 %").
+- Next: more live sessions on hardware (laptop loop ON), then Step 21.
+
 ## Now - final phase, approved 11 Nov 2026
 
 - Deadline: working and rehearsed by Saturday 14 Nov, end of day. Saturday is rehearsal only.
@@ -162,6 +175,7 @@ python -m src.evaluate [--rules old|step18] --prefix rehearsal --label rehearsal
 python -m src.evaluate [--rules old] --false-alarms pcap/baseline.pcapng pcap/baseline2.pcapng --out results/false_alarms_fixed.csv
 # live sessions (Step 20): also writes <out>_timing.csv (to-detect / contained, needs the live meta + answer):
 python -m src.evaluate --prefix live_session --label live-sessions --runs <N> --out results/table_live_sessions.csv
+#   ...and without a noted session (same set minus one): add --exclude live_session_02 --label "live-sessions (laptop loop on)" --out results/table_live_sessions_loop_on.csv
 python -m src.reconvert                               # fallback rung 3: re-convert the real captures into lab_* runs (needs the pcaps)
 python -m src.live --session <name> [--replay <pcap>] [--speed 20]   # live engine (Step 15)
 python -m src.live_capture --session <name>          # ADMINISTRATOR terminal: the capture

@@ -105,6 +105,15 @@ def _uptime(seconds) -> str:
     return "%dh %02dm %02ds (%d s)" % (hours, rest // 60, rest % 60, seconds)
 
 
+def _hundredths(value) -> str:
+    """2452 -> "24.52", -5 -> "-0.05"; anything that is not a whole number is shown as it is."""
+    if isinstance(value, bool) or not isinstance(value, int):
+        return str(value)
+    sign = "-" if value < 0 else ""
+    whole, frac = divmod(abs(value), 100)
+    return "%s%d.%02d" % (sign, whole, frac)
+
+
 def _show(key, value) -> str:
     if key == "up":
         return _uptime(value)
@@ -115,10 +124,14 @@ def _show(key, value) -> str:
     if key == "sub" and isinstance(value, list):
         return ", ".join(str(v) for v in value)
     if key == "readings" and isinstance(value, list):
+        # Each reading is [sequence number, temperature, humidity], the last
+        # two in HUNDREDTHS (the firmware keeps them as whole numbers to save
+        # beacon space): 2452 means 24.52 C, 5387 means 53.87 %.
         rows = []
         for item in value:
             if isinstance(item, list) and len(item) == 3:
-                rows.append("#%s: %s C, %s %%" % tuple(item))
+                seq, temp, hum = item
+                rows.append("#%s: %s C, %s %%" % (seq, _hundredths(temp), _hundredths(hum)))
             else:
                 rows.append(str(item))
         return "; ".join(rows)

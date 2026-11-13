@@ -242,6 +242,9 @@ download button). No new dependency. Sections:
   numbers will not transfer automatically.
 - **Code done 13 Nov (not flashed).** The firmware and `src/listener.py` are changed and
   tested; nothing on the boards has changed. See section 7, "Step 22 PREPARED".
+- **DONE 13 Nov.** Both boards flashed; `live_session_02` (esp32-03, new firmware) correct
+  at 100%, beacon unchanged on the wire (496 bytes every 30 s). See section 7, "Step 22
+  done". The steps below are kept as the record of how it was flashed.
 
 - **Exact re-flash steps for tomorrow (esp32-02 and esp32-03).** Do one board at a time.
   The ONLY line that differs between boards is `#define DEVICE_ID`.
@@ -476,6 +479,41 @@ so it was right on only 4 of the 12 batch runs and blamed laptop-i3 for rehearsa
   per-board profile, and prints everything collected at Ctrl+C. Old test-firmware beacons
   and non-JSON still display. NOT YET MEASURED on hardware: the board is re-flashed tomorrow
   (Step 22 proper), then one capture must confirm the 200-byte / 30-s shape on the wire.
+
+13 Nov, Step 22 DONE - both boards re-flashed with the new firmware; `live_session_02` on
+hardware (`--origin esp32-03`): **correct**.
+- esp32-03 named at 100%, nothing else flagged, no rejoin minutes. Trigger 15:55:11, INCIDENT
+  15:58:27 = **3 min 16 s** to the alert (196.5 s). Containment: the operator unplugged
+  esp32-03 (last beacon 15:59:11); CONTAINED 16:00:41, 90 s after that last beacon (2 min 14 s
+  after the alert). Re-converting the raw capture (`--pcap-dir pcap/live`) gives the same
+  verdict as the live engine's own flow table, for both sessions.
+- The new beacon on the wire: 8 beacons, every one 496 bytes out (666 both ways), 30.0 s
+  apart - byte-for-byte the same shape as live_session_01's old-firmware beacons (8 x 496 B,
+  30.0 s). The listener showed the rotating 1/3 -> 2/3 -> 3/3 blocks. So the detector sees
+  no difference between the two payloads, as predicted (it never reads contents).
+- **Honest caveat - laptop loop OFF.** laptop-i3's connect/disconnect loop did not start
+  (the operator's Enter key did not register): 22 laptop flows in the session against 614 in
+  live_session_01. So the noisy innocent device - the main false-alarm risk - was absent, and
+  this session does not test that risk. Kept and scored, never deleted; labelled
+  `"laptop loop off"` in `evaluate.SESSION_NOTES`, which prints it beside the session and adds
+  a `note` column to the per-run and timing files.
+- Scored both ways (new `--exclude` option, applied after `--runs` so it is the same set
+  minus one session):
+
+  | set | sessions | V5 top-1 | top-3 | abstained | to detect | contained after alert |
+  |---|---|---|---|---|---|---|
+  | all live sessions | 2 | 100% (2/2) | 100% | 0 | 3:40, 3:16 | 1:50, 2:14 |
+  | laptop loop on only | 1 | 100% (1/1) | 100% | 0 | 3:40 | 1:50 |
+
+  Files: `results/table_live_sessions.csv` (+ `_per_run`, `_timing`) and
+  `results/table_live_sessions_loop_on.csv` (+ `_per_run`, `_timing`). Reproduce:
+  `python -m src.evaluate --prefix live_session --label live-sessions --runs 2 --out
+  results/table_live_sessions.csv` and the same with `--label "live-sessions (laptop loop
+  on)" --exclude live_session_02 --out results/table_live_sessions_loop_on.csv`.
+- Listener fix: readings are hundredths, now shown as "24.52 C, 53.87 %" (was "2452 C,
+  5387 %"). Display only; the detector never sees the beacon's contents.
+- Not changed: every earlier table and per-run file (the note column appears only in a set
+  that contains a noted session).
 
 ## 8. Limits to state honestly
 

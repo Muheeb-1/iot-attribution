@@ -1,0 +1,2 @@
+run_id,scenario,origin,via_broker,V5 attribution,V5 (prototype indicator rule),confidence,abstained,abstained_prototype,indicator_edges,indicator_edges_prototype,origin_flagged,origin_flagged_plain,n_flagged,flagged,rejoin_minutes,rules,B1 total bytes,fair B1 total bytes,B2 anomaly score,fair B2 anomaly score,B3 connection count,fair B3 connection count,B4 earliest onset,fair B4 earliest onset
+live_session_01,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,,new,2,2,2,2,2,2,1,1

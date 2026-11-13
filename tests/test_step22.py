@@ -64,9 +64,20 @@ def test_the_block_labels_fields_and_hides_nothing_sensitive():
 def test_readings_are_shown_as_temperature_and_humidity():
     body = {"dev": "esp32-02", "part": "3/3", "readings": [[120, 2413, 5120]]}
     block = listener.format_beacon(_pad(body), "192.168.0.160:5000", "12:00:00")
-    # temp/hum are sent as hundredths; shown as-is from the ints (listener does
-    # not rescale - the raw values are what the attacker got).
+    # temp/hum are sent as hundredths and shown as real units (fix, 13 Nov:
+    # live_session_02's listener printed "2452 C, 5387 %").
     assert "recent readings" in block and "#120" in block
+    assert "#120: 24.13 C, 51.20 %" in block
+    assert "2413 C" not in block
+
+
+def test_readings_hundredths_edge_values():
+    body = {"dev": "esp32-02", "part": "3/3",
+            "readings": [[1, 2452, 5387], [2, -5, 7], [3, -1250, 10000]]}
+    block = listener.format_beacon(_pad(body), "192.168.0.160:5000", "12:00:00")
+    assert "#1: 24.52 C, 53.87 %" in block
+    assert "#2: -0.05 C, 0.07 %" in block
+    assert "#3: -12.50 C, 100.00 %" in block
 
 
 def test_the_old_test_firmware_beacon_still_reads():
@@ -209,3 +220,68 @@ def test_features_are_computed_from_counts_sizes_and_timing_only():
     assert "payload" not in table.columns
     # The feature list is addresses/counts/sizes/timing - nothing payload-shaped.
     assert not any("payload" in c or "content" in c for c in features.FEATURE_COLUMNS)
+
+
+# --------------------------------------------------------------------------
+# Step 22 measured (13 Nov): live_session_02, the first session on the new
+# firmware - and the operator's note that its laptop loop was off.
+# --------------------------------------------------------------------------
+
+from src import evaluate, runs  # noqa: E402
+
+_GT = Path(__file__).resolve().parent.parent / "groundtruth"
+
+
+def test_live_session_02_carries_its_note_and_nothing_else_does():
+    assert evaluate.session_note("live_session_02") == "laptop loop off"
+    assert evaluate.session_note("live_session_01") == ""
+    assert evaluate.session_note("live_batch_05") == ""
+
+
+def _fake_record(run_id, **_):
+    methods = (evaluate.BASELINE_NAMES + evaluate.V5_METHODS
+               + ["fair " + b for b in evaluate.BASELINE_NAMES])
+    return {"run_id": run_id, **{m: 1 for m in methods},
+            "abstained": False, "abstained_prototype": False}
+
+
+def test_exclude_leaves_a_session_out_of_the_same_set(monkeypatch):
+    monkeypatch.setattr(evaluate.runs, "list_runs",
+                        lambda prefix=None: ["s_01", "s_02", "s_03"])
+    monkeypatch.setattr(evaluate, "evaluate_one", _fake_record)
+    records, summary, _ = evaluate.evaluate_scenario("s", limit=2, exclude=["s_02"])
+    # --runs is applied first, then the exclusion: s_01 alone, never s_03.
+    assert [r["run_id"] for r in records] == ["s_01"]
+    assert int(summary["runs"].iloc[0]) == 1
+    records, _, _ = evaluate.evaluate_scenario("s", limit=2)
+    assert [r["run_id"] for r in records] == ["s_01", "s_02"]
+
+
+def test_a_note_rides_along_only_on_the_noted_run(monkeypatch):
+    monkeypatch.setattr(evaluate.runs, "list_runs",
+                        lambda prefix=None: ["live_session_01", "live_session_02"])
+    monkeypatch.setattr(evaluate, "evaluate_one", _fake_record)
+    records, _, _ = evaluate.evaluate_scenario("live_session", limit=2)
+    assert "note" not in records[0]
+    assert records[1]["note"] == "laptop loop off"
+
+
+@pytest.mark.skipif(not runs.meta_path("live_session_02").exists()
+                    or not (_GT / "live_session_02.json").exists(),
+                    reason="needs data/live_session_02 and its answer file")
+def test_live_session_02_as_scored_on_13_nov():
+    row = evaluate.live_timing("live_session_02")
+    assert row["origin"] == "esp32-03" and row["alert_right"]
+    assert row["detect_seconds"] == pytest.approx(196.5, abs=0.2)     # 3 min 16 s
+    assert row["contained"] and row["contained_device"] == "esp32-03"
+    assert row["contained_clock"] and row["note"] == "laptop loop off"
+    assert evaluate.evaluate_one("live_session_02")[evaluate.V5_FIXED] == 1
+    # The new firmware's beacons look exactly like the old ones on the wire:
+    # one 496-byte connection every 30 s, as in live_session_01.
+    flows = runs.load_run("live_session_02").connections
+    beacons = flows[flows.dport == 4444]
+    assert set(beacons.src) == {"esp32-03"} and len(beacons) == 8
+    assert set(beacons.bytes_out) == {496}
+    assert beacons.t.diff().dropna().round().eq(30).all()
+    # ...and the laptop's loop really was off: 22 flows (614 in session 01).
+    assert (flows.src == "laptop-i3").sum() == 22
