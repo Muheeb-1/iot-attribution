@@ -522,12 +522,18 @@ def build_incident(run: runs.Run, detection: detect.Detection,
     }
 
     # ---- 6. impact ---------------------------------------------------------
+    # Count over the SAME window as section 4 (everything after the baseline),
+    # not from the onset. The onset is only when we NOTICED; the attack began a
+    # few windows earlier, at the trigger. Counting from the onset dropped the
+    # first beacon or two, so section 4 ("8 connections to broker:4444") and
+    # section 6 ("x7") disagreed about the same endpoint. One count, the final
+    # post-baseline total at STOP, shared by both.
     reach = {}
     for dev in flagged:
         mine = connections[connections["src"] == dev]
         before = set(zip(mine[mine["t"] < run.baseline_seconds]["dst"],
                          mine[mine["t"] < run.baseline_seconds]["dport"].astype(int)))
-        after = mine[mine["t"] >= detection.onsets[dev]]
+        after = mine[mine["t"] >= run.baseline_seconds]
         rows = []
         for (dst, dport), g in after.groupby(["dst", "dport"], sort=True):
             rows.append({"label": endpoint_label(dst, dport), "count": int(len(g)),

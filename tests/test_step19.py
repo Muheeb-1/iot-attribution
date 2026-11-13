@@ -78,6 +78,47 @@ def test_labels_and_durations_read_naturally():
 
 
 # --------------------------------------------------------------------------
+# Sections 4 and 6 count the same endpoint the same way
+# --------------------------------------------------------------------------
+
+def _single_board_report(onset_seconds):
+    """
+    A one-board attack: normal MQTT all along, then a broker:4444 beacon from
+    800 s every 30 s (14 of them). The onset is passed in, so it can be placed
+    AFTER the first beacon - which is what happens on the real captures, where
+    three-in-a-row is only confirmed a couple of windows into the attack.
+    """
+    recs = [(20.0 * k, "dev-a", "broker", 1883, 300) for k in range(72)]
+    recs += [(800.0 + 30 * k, "dev-a", "broker", 4444, 496) for k in range(14)]
+    run = runs.Run(run_id="syn", scenario="capture", connections=flows(sorted(recs)),
+                   device_names=["dev-a"], baseline_seconds=720, baseline_windows=12,
+                   capture_seconds=1260, window_seconds=60)
+    onset_w = int(onset_seconds // 60)
+    scores = {"dev-a": {w: (6.0 if w >= onset_w else 0.5) for w in range(21)}}
+    det = detect.Detection(scores=scores, onsets={"dev-a": onset_seconds},
+                           onset_windows={"dev-a": onset_w}, threshold=4.0,
+                           consecutive=3, window_seconds=60)
+    res = attribute.Attribution(named="dev-a", ranking=["dev-a"], shortlist=["dev-a"],
+                                confidence=1.0, abstained=False, story_ranking=["dev-a"])
+    return incident.build_incident(run, det, res)
+
+
+def test_impact_counts_the_attack_endpoint_the_same_as_the_how_section():
+    # The onset (900 s) is well after the first beacon (800 s). Counting the
+    # impact from the onset used to drop those early beacons, so section 4 said
+    # 14 and section 6 said 10 for the same broker:4444. They must agree now.
+    report = _single_board_report(onset_seconds=900.0)
+    s4 = {p["label"]: p["count"] for p in report["how"]["patterns"]}
+    s6 = {r["label"]: r["count"] for r in report["impact"]["reach"]["dev-a"]}
+    assert s4["broker:4444"] == 14
+    assert s6["broker:4444"] == 14                 # was 10 before the fix
+    # In general: every endpoint shown in both sections has one shared count.
+    for label, count in s4.items():
+        assert s6.get(label) == count, label
+    assert "x14" in incident.render_text(report)    # the rendered impact line too
+
+
+# --------------------------------------------------------------------------
 # The CONTAINED check
 # --------------------------------------------------------------------------
 
@@ -298,6 +339,9 @@ def test_rehearsal_02_live_final_report_equals_the_offline_one(r2_live):
     for key in ("what_happened", "where", "how", "impact"):
         assert final[key] == json.loads(json.dumps(offline[key])), key
     assert final["how"]["patterns"][0]["count"] == 12
+    # Section 6 counts broker:4444 the same as section 4 (one count at STOP).
+    reach = {r["label"]: r["count"] for r in final["impact"]["reach"]["esp32-03"]}
+    assert reach["broker:4444"] == 12
     assert (tmp / "reports" / "r2.html").exists()
     assert (s.folder / "SHA256SUMS.txt").exists()
     assert s.evidence["files"] == len(s.files_read)
