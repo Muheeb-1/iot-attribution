@@ -1,0 +1,161 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>Report design reference - INC-20261113-07</title>
+<!--
+  DESIGN REFERENCE for the incident report (Step P4 of docs/POLISH_PLAN.md).
+  The same HTML is shown in the browser and printed to PDF, so it is a light, A4 design.
+  Two pages at most. Numbers are live_session_07's. Fonts ship with Windows 11.
+-->
+<style>
+  @page { size: A4; margin: 14mm 14mm 16mm; }
+  :root { --ink: #101A2E; --soft: #44536F; --muted: #6D7B95; --rule: #D5DCE8; --wash: #F2F5FA;
+          --navy: #0E1524; --alert: #C9283B; --alert-wash: #FCEBEE; --ok: #0F7D62; --ok-wash: #E4F5F0; --amber: #8A5A00;
+          --display: "Bahnschrift", "DIN Alternate", "Barlow Semi Condensed", "Segoe UI", sans-serif;
+          --body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+          --mono: "Cascadia Mono", Consolas, monospace; }
+  * { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+  body { margin: 0 auto; max-width: 182mm; color: var(--ink); font: 10.5pt/1.5 var(--body); background: #fff; }
+  @media screen { body { padding: 28px 0 60px; } }
+  h1, h2, p, ul { margin: 0; }
+  .mono { font-family: var(--mono); font-size: 0.93em; }
+
+  .head { background: var(--navy); color: #fff; border-radius: 8px; padding: 18px 22px; display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end; }
+  .head .org { font: 500 9.5pt var(--body); color: #B4C2DB; }
+  .head h1 { font: 600 22pt/1.1 var(--display); margin-top: 3px; }
+  .head h1 .dev { font-family: var(--mono); font-size: 0.86em; white-space: nowrap; }
+  .head .id { text-align: right; font: 600 12pt var(--mono); }
+  .head .id small { display: block; font: 400 9pt var(--body); color: #B4C2DB; }
+  .tags { display: flex; gap: 8px; margin-top: 12px; }
+  .tag { font: 600 9pt var(--body); padding: 3px 10px; border-radius: 999px; }
+  .tag.sev { background: #FF5D6C; color: #2A0A10; }  .tag.ok { background: #35C7A0; color: #06261E; }
+  .tag.plain { background: #1E2B44; color: #E8EEF9; }
+
+  .keys { display: grid; grid-template-columns: repeat(4, 1fr); margin: 14px 0 4px; border: 1px solid var(--rule); border-radius: 8px; }
+  .keys > div { padding: 11px 14px; border-left: 1px solid var(--rule); }  .keys > div:first-child { border-left: 0; }
+  .keys .v { white-space: nowrap; font: 600 15pt/1.1 var(--display); font-variant-numeric: tabular-nums; }
+  .keys .k { color: var(--muted); font-size: 8.5pt; margin-top: 3px; }
+
+  h2 { font: 600 12.5pt var(--display); margin: 18px 0 7px; padding-bottom: 4px; border-bottom: 2px solid var(--ink); }
+  section { break-inside: avoid; }
+  .summary { font-size: 11.5pt; line-height: 1.55; }
+  .source { color: var(--ok); font-size: 8.5pt; margin-top: 6px; font-weight: 600; }
+
+  .tl { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 4px; }
+  .tl div { border-top: 2px solid var(--rule); padding: 9px 8px 0 0; position: relative; }
+  .tl div::before { content: ""; position: absolute; top: -6px; left: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .tl .hot::before { background: var(--alert); }  .tl .good::before { background: var(--ok); }
+  .tl b { display: block; font: 600 12pt var(--display); font-variant-numeric: tabular-nums; }
+  .tl span { color: var(--soft); font-size: 8.5pt; }
+
+  table { border-collapse: collapse; width: 100%; font-size: 9.5pt; }
+  th { text-align: left; color: var(--muted); font-weight: 600; font-size: 8.5pt; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--rule); }
+  td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+  td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .two { display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; }
+  .bars { display: flex; align-items: flex-end; gap: 3px; height: 44px; position: relative; margin-top: 4px; }
+  .bars i { flex: 1; background: #B9C4D8; border-radius: 2px 2px 0 0; min-height: 2px; }
+  .bars i.over { background: var(--alert); }  .bars i.base { background: #DDE3EE; }
+  .bars::after { content: ""; position: absolute; left: 0; right: 0; bottom: 40%; border-top: 1px dashed var(--soft); }
+  .cap { color: var(--muted); font-size: 8.5pt; margin-top: 4px; }
+
+  .tech { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline; }
+  .tech > b { font: 600 9.5pt var(--mono); background: var(--wash); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 7px; }
+  .steps { list-style: none; padding: 0; }
+  .steps li { display: grid; grid-template-columns: 16px 62px 1fr; gap: 9px; padding: 6px 0; border-bottom: 1px solid var(--rule); }
+  .steps .box { width: 13px; height: 13px; border: 1.5px solid var(--soft); border-radius: 3px; margin-top: 3px; }
+  .steps .done .box { background: var(--ok); border-color: var(--ok); }
+  .steps .when { font-weight: 600; font-size: 8.5pt; color: var(--alert); padding-top: 2px; }
+  .steps .when.later { color: var(--amber); }
+  .note { background: var(--wash); border-radius: 6px; padding: 9px 12px; font-size: 9.5pt; color: var(--soft); }
+  .note li { margin-left: 16px; }
+  .foot { margin-top: 16px; color: var(--muted); font-size: 8pt; display: flex; justify-content: space-between; border-top: 1px solid var(--rule); padding-top: 6px; }
+</style>
+</head>
+<body>
+
+<header class="head">
+  <div>
+    <div class="org">IoT Incident Attribution, incident report</div>
+    <h1>Attack started on <span class="dev">esp32-03</span></h1>
+    <div class="tags"><span class="tag sev">Severity high</span><span class="tag ok">Contained</span><span class="tag plain">Confidence 100%</span></div>
+  </div>
+  <div class="id">INC-20261113-07<small>13 Nov 2026, session live_session_07</small></div>
+</header>
+
+<div class="keys">
+  <div><div class="v">esp32-03</div><div class="k">origin device, 192.168.0.203</div></div>
+  <div><div class="v">3 min 08 s</div><div class="k">to detect</div></div>
+  <div><div class="v">14 s</div><div class="k">to acknowledge</div></div>
+  <div><div class="v">1 min 22 s</div><div class="k">to contain</div></div>
+</div>
+
+<section>
+  <h2>What happened</h2>
+  <p class="summary"><b>esp32-03 was compromised at 19:30:19.</b> It began opening a connection to <span class="mono">192.168.0.200:4444</span> every <b>30 seconds</b>, sending <b>496 bytes</b> each time. It never used that port while its normal behaviour was being learned. <b>No other device changed its behaviour</b>, so the attack started here and did not spread.</p>
+  <p class="source">&#10003; Written by the AI analyst (gemini-3.6-flash). Every fact checked against the evidence.</p>
+</section>
+
+<section>
+  <h2>Timeline</h2>
+  <div class="tl">
+    <div><b>19:29:18</b><span>Baseline established</span></div>
+    <div class="hot"><b>19:30:19</b><span>First unusual connection</span></div>
+    <div class="hot"><b>19:33:27</b><span>Alert raised</span></div>
+    <div><b>19:33:41</b><span>Acknowledged by operator</span></div>
+    <div class="good"><b>19:34:49</b><span>Contained, 90 s of silence</span></div>
+  </div>
+</section>
+
+<section class="two">
+  <div>
+    <h2>How it was found</h2>
+    <table>
+      <tr><th>New destination</th><th>Connections</th><th>Gap</th><th>Bytes out / back</th></tr>
+      <tr><td class="mono">192.168.0.200:4444</td><td class="n"><b>7</b></td><td class="n"><b>~30 s</b></td><td class="n"><b>496</b> / 170</td></tr>
+    </table>
+    <p class="cap">Never used in the 12-minute baseline. Evidence connections: <span class="mono">C000450, C000468, C000486</span>.</p>
+  </div>
+  <div>
+    <h2>Why we believe it</h2>
+    <div class="bars" role="img" aria-label="esp32-03 score per minute; three minutes over the alert line">
+      <i class="base" style="height:50%"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i><i class="base"></i>
+      <i style="height:3%"></i><i class="over" style="height:52%"></i><i class="over" style="height:52%"></i><i class="over" style="height:52%"></i><i style="height:33%"></i>
+    </div>
+    <p class="cap"><b>3 minutes in a row</b> over the alert line (4.0): scores 5.2, 5.2, 5.2. Connections per minute went from 1 to 3.</p>
+  </div>
+</section>
+
+<section>
+  <h2>Attack techniques seen (MITRE ATT&amp;CK)</h2>
+  <div class="tech">
+    <b>T1571</b><span><b>Non-standard port.</b> Port 4444 was never used in the baseline.</span>
+    <b>T1029</b><span><b>Scheduled transfer.</b> One connection every 30 seconds, machine-regular.</span>
+    <b>T1041</b><span><b>Data leaving over the control channel.</b> 496 bytes out for 170 back, every time.</span>
+  </div>
+</section>
+
+<section>
+  <h2>What to do</h2>
+  <ul class="steps">
+    <li class="done"><span class="box"></span><span class="when">Now</span><span><b>Isolate esp32-03.</b> Pull its power, or block MAC <span class="mono">30:76:f5:e5:e5:ac</span> on the router. Done: confirmed contained at 19:34:49.</span></li>
+    <li><span class="box"></span><span class="when">Now</span><span><b>Keep the capture as evidence.</b> 107 files in <span class="mono">pcap\live\live_session_07</span>.</span></li>
+    <li><span class="box"></span><span class="when later">Today</span><span><b>Re-flash the board</b> from known-good firmware and <b>change the Wi-Fi and broker credentials</b> it held.</span></li>
+    <li><span class="box"></span><span class="when later">Today</span><span><b>Reconnect it only after a clean baseline</b> shows it as normal.</span></li>
+  </ul>
+</section>
+
+<section>
+  <h2>Evidence and limits</h2>
+  <p class="cap" style="margin:0 0 8px">SHA-256 of the capture file list: <span class="mono">cdc8789d34462994e05d71b7c5ca1189cdb369a5979b65db2dee064f85966de5</span></p>
+  <div class="note"><ul>
+    <li>The capture point sees traffic to and from the master laptop, plus broadcasts. <b>Board-to-board traffic is not visible.</b></li>
+    <li>The alert needs three abnormal minutes in a row, so it comes <b>3 to 4 minutes</b> after an attack starts.</li>
+    <li>This report states what was measured. <b>The method can be wrong</b>; check the evidence connections before acting on anything irreversible.</li>
+  </ul></div>
+</section>
+
+<div class="foot"><span>Verdict and numbers: detection and attribution engine (V5). Wording: AI analyst, validated.</span><span>INC-20261113-07</span></div>
+</body>
+</html>

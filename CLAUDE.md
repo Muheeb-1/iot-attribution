@@ -104,7 +104,18 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
 - README.md is now up to date (Steps 1-22, all tables). `docs/LIVE_DEMO.md` is the demo script
   (start order, minute by minute, fallback ladder, judge Q&A). `tests/test_step21.py` checks
   that every command in both documents exists - keep it green when editing them.
-- Next: two dress rehearsals (Saturday), then freeze.
+- Next: two dress rehearsals (Saturday), then freeze. (Superseded 14 Nov: the polish phase
+  is approved and runs first - see "Polish phase" below. The freeze comes after P6.)
+
+## Polish phase - approved by Muheeb 14 Nov 2026
+
+- Replaces the "freeze, no code changes" note above and the "Step 23 not without asking"
+  note below. The work follows `docs/POLISH_PLAN.md` (steps P1-P6, one at a time, stop and
+  report after each; its section 2 rules apply to every step). Design references:
+  `docs/design/console_mockup.html` and `docs/design/report_mockup.html`.
+- The core is locked at tag `core-locked` (7ca51aa). No polish step may change a verdict or
+  a score: `tests/test_polish_invariant.py` (added in P1) replays live_session_07 and _03 through the live
+  path after every step, and `git diff --exit-code results/` must stay clean.
 
 ## Now - final phase, approved 11 Nov 2026
 
@@ -112,8 +123,8 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
 - Steps 15-21 and their day-by-day order are in `docs/LIVE_PLAN.md` section 5 (version 3,
   12 Nov: Step 18 = rehearsal_01 fixes, Step 19 = incident report); the decisions
   already taken are in its section 2. Do not reopen them without asking Muheeb.
-- Recorded for later, NOT to be started without asking: Step 22 realistic beacon payload
-  (guide's request, needs re-flashing), Step 23 visual redesign of the dashboard.
+- Step 22 (realistic beacon payload) is done. Step 23 (visual redesign of the dashboard) is
+  APPROVED (14 Nov) as the polish phase and follows `docs/POLISH_PLAN.md`.
 - Priority order when time is short: a demo that cannot fail > features > polish. Keep the
   fallback ladder working at every commit (live capture -> `--replay` on the live page ->
   the existing replay dashboard).

@@ -1,0 +1,328 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Console design reference - IoT Incident Attribution</title>
+<!--
+  DESIGN REFERENCE (not app code). Built 14 Nov 2026 for Step P2 of docs/POLISH_PLAN.md.
+  The live page in dashboard/ should look like this. Numbers are live_session_07's.
+  Fonts are ones Windows 11 already has: Bahnschrift (headings, numbers),
+  Segoe UI Variable (text), Cascadia Mono (addresses, ids). No web fonts, no CDN.
+  Use the bar at the bottom of this page to step through the phases.
+-->
+<style>
+  :root {
+    --page: #0E1524;  --panel: #162033;  --raised: #1E2B44;  --line: #2A3A59;
+    --text: #E8EEF9;  --soft: #B4C2DB;   --muted: #8496B5;
+    --ok: #35C7A0;    --learn: #6FA8FF;  --watch: #F2B544;   --alert: #FF5D6C;
+    --ok-bg: #10312F; --learn-bg: #15294A; --watch-bg: #3A2F17; --alert-bg: #3D1722;
+    --bar: #5C6F92;   --bar-dim: #33435F;
+    --display: "Bahnschrift", "DIN Alternate", "Barlow Semi Condensed", "Segoe UI", sans-serif;
+    --body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+    --mono: "Cascadia Mono", "Cascadia Code", Consolas, monospace;
+  }
+  * { box-sizing: border-box; }
+  html, body { margin: 0; }
+  body { background: var(--page); color: var(--text); font: 15px/1.45 var(--body); padding-bottom: 72px; }
+  h1, h2, h3, p { margin: 0; }
+  .num { font-family: var(--display); font-variant-numeric: tabular-nums; }
+  .mono { font-family: var(--mono); font-size: 0.92em; }
+
+  /* ---- top bar ---- */
+  .top { display: flex; align-items: center; gap: 20px; height: 52px; padding: 0 24px;
+         border-bottom: 1px solid var(--line); }
+  .brand { font: 600 19px var(--display); letter-spacing: 0.01em; }
+  .brand small { font: 400 13px var(--body); color: var(--muted); margin-left: 10px; }
+  .top nav { display: flex; gap: 4px; margin-left: 12px; }
+  .top nav a { color: var(--soft); text-decoration: none; padding: 6px 12px; border-radius: 6px; font-size: 14px; }
+  .top nav a.on { background: var(--raised); color: var(--text); }
+  .top .right { margin-left: auto; display: flex; align-items: center; gap: 18px; color: var(--soft); font-size: 14px; }
+  .dot { width: 9px; height: 9px; border-radius: 50%; background: var(--ok); display: inline-block; margin-right: 7px; }
+  .clock { font: 600 22px var(--display); color: var(--text); font-variant-numeric: tabular-nums; }
+
+  /* ---- status band: the one loud thing on the page ---- */
+  .band { margin: 18px 24px 0; padding: 22px 26px; border-radius: 10px; border: 1px solid var(--line);
+          display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center;
+          background: var(--panel); transition: background .4s, border-color .4s; }
+  .band .state { font: 500 14px var(--body); display: flex; align-items: center; gap: 8px; margin-bottom: 6px; }
+  .band .state svg { width: 18px; height: 18px; flex: none; }
+  .band h1 { font: 600 40px/1.08 var(--display); letter-spacing: -0.005em; }
+  .band h1 .dev { font-family: var(--mono); font-size: 0.86em; font-weight: 600; }
+  .band .sub { color: var(--soft); margin-top: 8px; font-size: 16px; max-width: 70ch; }
+  .band .sub b { color: var(--text); }
+  .band.learn   { background: var(--learn-bg); border-color: #2C4E86; }  .band.learn .state { color: var(--learn); }
+  .band.ok      { background: var(--ok-bg);    border-color: #1F6B5C; }  .band.ok .state { color: var(--ok); }
+  .band.watch   { background: var(--watch-bg); border-color: #7A6325; }  .band.watch .state { color: var(--watch); }
+  .band.alert   { background: var(--alert-bg); border-color: var(--alert); }  .band.alert .state { color: var(--alert); }
+  .band.alert.ringing { animation: ring 1.6s ease-out infinite; }
+  @keyframes ring { 0% { box-shadow: 0 0 0 0 rgba(255,93,108,.55); } 100% { box-shadow: 0 0 0 18px rgba(255,93,108,0); } }
+  .progress { height: 6px; border-radius: 3px; background: #223A63; margin-top: 16px; max-width: 520px; overflow: hidden; }
+  .progress i { display: block; height: 100%; background: var(--learn); border-radius: 3px; transition: width .6s; }
+
+  .side { display: flex; align-items: center; gap: 26px; }
+  .kpis { display: flex; gap: 26px; }
+  .kpi .v { font: 600 30px/1 var(--display); font-variant-numeric: tabular-nums; }
+  .kpi .v.wait { color: var(--muted); }
+  .kpi .k { color: var(--soft); font-size: 13px; margin-top: 5px; }
+  .btn { font: 600 15px var(--body); border: 0; border-radius: 8px; padding: 12px 20px; cursor: pointer; }
+  .btn.ack { background: var(--alert); color: #2A0A10; }
+  .btn.ack:focus-visible, .phasebar button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+  .acked { color: var(--soft); font-size: 14px; }
+
+  /* ---- main grid ---- */
+  .grid { display: grid; grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr); gap: 18px; margin: 18px 24px 0; }
+  .card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
+  .card h2 { font: 600 17px var(--display); letter-spacing: 0.01em; }
+  .card .hint { color: var(--muted); font-size: 13px; margin-top: 2px; }
+
+  /* device lanes: one bar per minute, on one shared scale; the dashed line is the alert line */
+  .lane { display: grid; grid-template-columns: 178px minmax(0, 1fr) 150px; gap: 16px; align-items: center;
+          padding: 13px 0; border-top: 1px solid var(--line); }
+  .lane:first-of-type { border-top: 0; margin-top: 8px; }
+  .lane .name { font: 600 16px var(--mono); }
+  .lane .role { color: var(--muted); font-size: 13px; }
+  .lane.origin .name { color: var(--alert); }
+  .plot { position: relative; height: 54px; display: flex; align-items: flex-end; gap: 2px; }
+  .plot .m { flex: 1 1 0; min-width: 3px; border-radius: 3px 3px 0 0; background: var(--bar); min-height: 2px;
+             transition: height .5s; }
+  .plot .m.base { background: var(--bar-dim); }
+  .plot .m.empty { background: none; min-height: 0; }      /* minutes not reached yet: the scale never jumps */
+  .plot .m.over { background: var(--alert); }
+  .plot .m.capped { box-shadow: inset 0 3px 0 var(--text); }           /* taller than the scale: see tooltip */
+  .plot .split { flex: none; width: 1px; align-self: stretch; background: var(--soft); opacity: .55; margin: 0 4px; }
+  .plot::after { content: ""; position: absolute; left: 0; right: 0; bottom: 40%; border-top: 1px dashed var(--soft); opacity: .6; }
+  .lane .status { text-align: right; }
+  .badge { display: inline-flex; align-items: center; gap: 6px; font-size: 13px; font-weight: 600; padding: 3px 10px; border-radius: 999px; }
+  .badge.ok { color: var(--ok); background: var(--ok-bg); }       .badge.learn { color: var(--learn); background: var(--learn-bg); }
+  .badge.watch { color: var(--watch); background: var(--watch-bg); } .badge.alert { color: var(--alert); background: var(--alert-bg); }
+  .badge.off { color: var(--muted); background: var(--raised); }
+  .strikes { display: flex; gap: 4px; justify-content: flex-end; margin-top: 7px; }
+  .strikes i { width: 26px; height: 6px; border-radius: 3px; background: var(--raised); }
+  .strikes i.hit { background: var(--watch); }  .strikes.full i.hit { background: var(--alert); }
+  .axis { display: grid; grid-template-columns: 178px minmax(0, 1fr) 150px; gap: 16px; color: var(--muted); font-size: 12px; margin-top: 4px; }
+  .axis div { display: flex; justify-content: space-between; }
+  .legend { display: flex; flex-wrap: wrap; gap: 16px; color: var(--soft); font-size: 13px; margin-top: 12px; }
+  .legend span::before { content: ""; display: inline-block; width: 10px; height: 10px; border-radius: 2px; margin-right: 6px; vertical-align: -1px; background: var(--bar); }
+  .legend .l-base::before { background: var(--bar-dim); } .legend .l-over::before { background: var(--alert); }
+  .legend .l-line::before { height: 0; border-top: 1px dashed var(--soft); width: 16px; background: none; vertical-align: 3px; border-radius: 0; }
+
+  /* right column */
+  .facts { display: grid; grid-template-columns: 1fr 1fr; gap: 14px 18px; margin-top: 14px; }
+  .fact .v { font: 600 24px/1.1 var(--display); font-variant-numeric: tabular-nums; }
+  .fact .k { color: var(--muted); font-size: 13px; }
+  .path { display: flex; align-items: center; gap: 10px; margin: 16px 0 14px; }
+  .node { border: 1px solid var(--line); background: var(--raised); border-radius: 8px; padding: 9px 12px; font: 600 14px var(--mono); }
+  .node small { display: block; font: 400 12px var(--body); color: var(--muted); }
+  .node.bad { border-color: var(--alert); color: var(--alert); }
+  .wire { flex: 1; border-top: 2px dashed var(--alert); position: relative; min-width: 30px; }
+  .wire::after { content: ""; position: absolute; right: -1px; top: -6px; border: 5px solid transparent; border-left-color: var(--alert); }
+  .do { margin-top: 16px; padding-top: 14px; border-top: 1px solid var(--line); }
+  .do h3 { font: 600 15px var(--display); margin-bottom: 6px; }
+  .do p { color: var(--soft); }  .do b { color: var(--text); }
+
+  /* report row */
+  .report { margin: 18px 24px 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 18px; }
+  .report .wide { grid-column: span 2; }
+  .summary p { font-size: 16px; line-height: 1.55; margin-top: 10px; max-width: 76ch; }
+  .source { display: inline-flex; gap: 6px; align-items: center; color: var(--ok); font-size: 13px; margin-top: 12px; }
+  .steps { list-style: none; padding: 0; margin: 12px 0 0; }
+  .steps li { display: grid; grid-template-columns: 22px 1fr; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+  .steps li:first-child { border-top: 0; }
+  .steps .box { width: 18px; height: 18px; border: 2px solid var(--muted); border-radius: 4px; margin-top: 2px; }
+  .steps li.done .box { border-color: var(--ok); background: var(--ok); }
+  .steps .when { color: var(--muted); font-size: 12px; }
+  .chips { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 12px; }
+  .chip { border: 1px solid var(--line); border-radius: 6px; padding: 6px 10px; font-size: 13px; background: var(--raised); }
+  .chip b { font-family: var(--mono); margin-right: 6px; }
+  .tl { display: grid; grid-template-columns: repeat(5, 1fr); margin-top: 16px; }
+  .tl > div { border-top: 2px solid var(--line); padding-top: 10px; position: relative; }
+  .tl > div::before { content: ""; position: absolute; top: -6px; left: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+  .tl .hot::before { background: var(--alert); } .tl .good::before { background: var(--ok); }
+  .tl .t { font: 600 18px var(--display); font-variant-numeric: tabular-nums; } .tl .w { color: var(--soft); font-size: 13px; }
+  .hide { display: none !important; }
+
+  /* mockup-only phase switcher */
+  .phasebar { position: fixed; left: 0; right: 0; bottom: 0; background: #070B14; border-top: 1px solid var(--line);
+              display: flex; gap: 8px; align-items: center; padding: 10px 24px; font-size: 13px; color: var(--muted); z-index: 5; }
+  .phasebar button { font: 600 13px var(--body); background: var(--raised); color: var(--soft); border: 1px solid var(--line); border-radius: 6px; padding: 7px 12px; cursor: pointer; }
+  .phasebar button.on { background: var(--text); color: var(--page); }
+  @media (max-width: 980px) { .grid, .report { grid-template-columns: 1fr; } .report .wide { grid-column: auto; }
+    .band { grid-template-columns: 1fr; } .side { flex-wrap: wrap; } .lane, .axis { grid-template-columns: 120px 1fr; } .lane .status { grid-column: 1 / -1; text-align: left; } .strikes { justify-content: flex-start; } }
+  @media (prefers-reduced-motion: reduce) { .band.alert.ringing { animation: none; } * { transition: none !important; } }
+</style>
+</head>
+<body>
+
+<header class="top">
+  <div class="brand">IoT Incident Attribution<small>network forensics console</small></div>
+  <nav><a class="on" href="#">Live monitor</a><a href="#">Past sessions</a></nav>
+  <div class="right">
+    <span><span class="dot" id="capdot"></span><span id="capture">Capturing on Ethernet</span></span>
+    <span>Session <span class="mono">live_session_07</span></span>
+    <span class="clock" id="clock">19:33:30</span>
+  </div>
+</header>
+
+<section class="band" id="band" aria-live="polite">
+  <div>
+    <div class="state" id="state"></div>
+    <h1 id="headline"></h1>
+    <p class="sub" id="sub"></p>
+    <div class="progress hide" id="progress"><i></i></div>
+  </div>
+  <div class="side">
+    <div class="kpis" id="kpis"></div>
+    <button class="btn ack hide" id="ack">Acknowledge</button>
+    <span class="acked hide" id="acked">Acknowledged 19:33:41</span>
+  </div>
+</section>
+
+<section class="grid">
+  <div class="card">
+    <h2>Every device, minute by minute</h2>
+    <p class="hint">One bar per minute: how unusual that minute was. A device is flagged only after three minutes in a row over the line.</p>
+    <div id="lanes"></div>
+    <div class="axis"><span></span><div><span>19:17</span><span id="axis-mid" style="margin-left:14%">baseline ends 19:29</span><span>19:37</span></div><span></span></div>
+    <div class="legend"><span class="l-base">learning minute</span><span>monitored minute</span><span class="l-over">over the line</span><span class="l-line">alert line (4.0)</span></div>
+  </div>
+
+  <div class="card" id="sidecard"></div>
+</section>
+
+<section class="report hide" id="report">
+  <div class="card summary wide">
+    <h2>Analyst summary</h2>
+    <p><b>esp32-03 was compromised at 19:30:19.</b> It began opening a connection to <span class="mono">192.168.0.200:4444</span> every 30 seconds, sending 496 bytes each time. It never used that port while its normal behaviour was being learned. No other device changed its behaviour, so the attack started here and did not spread.</p>
+    <div class="source">&#10003; Written by the AI analyst. Every fact checked against the evidence.</div>
+    <div class="tl">
+      <div><div class="t">19:29:18</div><div class="w">Baseline established</div></div>
+      <div class="hot"><div class="t">19:30:19</div><div class="w">First unusual connection</div></div>
+      <div class="hot"><div class="t">19:33:27</div><div class="w">Alert raised</div></div>
+      <div><div class="t">19:33:41</div><div class="w">Acknowledged</div></div>
+      <div class="good"><div class="t">19:34:49</div><div class="w">Contained</div></div>
+    </div>
+  </div>
+  <div class="card">
+    <h2>What to do</h2>
+    <p class="hint">Recommended. The operator acts; nothing is blocked automatically.</p>
+    <ul class="steps" id="steps">
+      <li><span class="box"></span><div><b>Isolate esp32-03</b><div class="when">Now. Pull its power or block its MAC on the router.</div></div></li>
+      <li><span class="box"></span><div><b>Keep the capture as evidence</b><div class="when">Now. 107 files, fingerprinted with SHA-256 when the session closes.</div></div></li>
+      <li><span class="box"></span><div><b>Re-flash the board, change its credentials</b><div class="when">Today.</div></div></li>
+      <li><span class="box"></span><div><b>Reconnect after a clean baseline</b><div class="when">Today.</div></div></li>
+    </ul>
+  </div>
+  <div class="card wide">
+    <h2>Attack techniques seen</h2>
+    <p class="hint">Matched from the measured traffic to MITRE ATT&amp;CK, the standard catalogue of attack methods.</p>
+    <div class="chips">
+      <span class="chip"><b>T1571</b>Non-standard port: 4444, never used in the baseline</span>
+      <span class="chip"><b>T1029</b>Scheduled transfer: one connection every 30 s</span>
+      <span class="chip"><b>T1041</b>Data leaving over the control channel: 496 bytes out, 170 back</span>
+    </div>
+  </div>
+  <div class="card">
+    <h2>Report</h2>
+    <p class="hint">Incident INC-20261113-07, severity high.</p>
+    <p style="margin-top:12px"><button class="btn" style="background:var(--text);color:var(--page)">Download PDF</button></p>
+  </div>
+</section>
+
+<div class="phasebar" role="group" aria-label="Mockup: choose a phase">
+  <span>Design reference. Phase:</span>
+  <button data-p="learning">Learning</button><button data-p="monitoring">Monitoring</button>
+  <button data-p="watching">Watching</button><button data-p="incident" class="on">Incident</button>
+  <button data-p="contained">Contained</button>
+</div>
+
+<script>
+const SCORES = {   // per closed minute, live_session_07 (minutes 1-12 are the baseline)
+  "esp32-02":  [4.2,0,0,0,0,0,0,0,0,0,0,0, 0,0,0,0,0],
+  "esp32-03":  [5.0,0,0,0,0,0,0,0,0,0,0,0, 0.3,5.2,5.2,5.2,3.3],
+  "laptop-i3": [25,2.5,1.2,1.8,4.9,2.6,1.1,2.0,1.2,0.3,3.6,1.7, 0.6,1.3,2.6,2.0,3.0]
+};
+const ROLE = { "esp32-02": "sensor, 192.168.0.160", "esp32-03": "sensor, 192.168.0.203", "laptop-i3": "laptop, 192.168.0.218" };
+const ICON = {
+  learn: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/></svg>',
+  ok:    '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2l6 3v5c0 4-2.6 6.6-6 8-3.4-1.4-6-4-6-8V5z"/><path d="M7 10l2 2 4-4"/></svg>',
+  watch: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M1.5 10S5 4 10 4s8.5 6 8.5 6-3.500 6-8.5 6-8.500-6-8.500-6z"/><circle cx="10" cy="10" r="2.5"/></svg>',
+  alert: '<svg viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2"><path d="M10 2.500l8 14H2z"/><path d="M10 8v4M10 14.500v.5"/></svg>'
+};
+const PH = {
+  learning:  { n: 7,  cls: "learn", clock: "19:24:31", state: "Learning", head: "Learning normal behaviour",
+               sub: "Minute <b>7 of 12</b>. Monitoring starts at <b>19:29:18</b>.", progress: 58,
+               kpis: [["3", "devices seen"], ["2,412", "packets"]] },
+  monitoring:{ n: 12, cls: "ok", clock: "19:29:25", state: "Monitoring", head: "Monitoring 3 devices",
+               sub: "Baseline established at <b>19:29:18</b>. No device is over the line.",
+               kpis: [["3", "devices"], ["4,371", "packets"], ["0", "incidents"]] },
+  watching:  { n: 15, cls: "watch", clock: "19:32:24", state: "Watching", head: "Watching <span class='dev'>esp32-03</span>",
+               sub: "<b>2 of 3</b> minutes in a row over the line. One more raises an incident.",
+               kpis: [["3", "devices"], ["5,402", "packets"], ["0", "incidents"]] },
+  incident:  { n: 16, cls: "alert", clock: "19:33:30", state: "Incident, severity high", head: "The attack started on <span class='dev'>esp32-03</span>",
+               sub: "Confidence <b>100%</b>. No other device behaved abnormally.", ring: true,
+               kpis: [["3 min 08 s", "to detect"], ["--", "to acknowledge", 1], ["--", "to contain", 1]] },
+  contained: { n: 17, cls: "ok", clock: "19:34:57", state: "Contained", head: "Contained at 19:34:49",
+               sub: "<span class='mono'>esp32-03</span> has made no connection to <span class='mono'>192.168.0.200:4444</span> for 90 seconds. The incident stays open as the record.",
+               kpis: [["3 min 08 s", "to detect"], ["14 s", "to acknowledge"], ["1 min 22 s", "to contain"]], acked: true }
+};
+const SLOTS = 20;        // the plot always shows 20 minute slots (then scrolls), so bars keep one width
+const $ = id => document.getElementById(id);
+
+function lane(dev, p, key) {
+  const s = SCORES[dev].slice(0, p.n), last3 = s.slice(12).slice(-3);
+  let run = 0; for (let i = s.length - 1; i >= 12 && s[i] > 4; i--) run++;
+  if (key === "contained" && dev === "esp32-03") run = 3;
+  const flagged = (key === "incident" || key === "contained") && dev === "esp32-03";
+  let badge = '<span class="badge ok">Normal</span>';
+  if (p.n <= 12 && key === "learning") badge = '<span class="badge learn">Learning</span>';
+  else if (flagged && key === "contained") badge = '<span class="badge off">Offline, contained</span>';
+  else if (flagged) badge = '<span class="badge alert">Attack origin</span>';
+  else if (run > 0) badge = '<span class="badge watch">Watching ' + run + ' of 3</span>';
+  const bars = s.map((v, i) => {
+    const h = Math.max(4, Math.min(v, 10) * 10), cls = (i < 12 ? "base" : (v > 4 ? "over" : "")) + (v > 10 ? " capped" : "");
+    return (i === 12 ? '<span class="split"></span>' : "") + '<span class="m ' + cls + '" style="height:' + h + '%" title="minute ' + (i + 1) + ': score ' + v.toFixed(1) + '"></span>';
+  }).join("") + Array.from({length: Math.max(0, SLOTS - s.length)}, () => '<span class="m empty" style="height:0"></span>').join("");
+  const strikes = [0, 1, 2].map(i => '<i class="' + (i < Math.min(run, 3) ? "hit" : "") + '"></i>').join("");
+  return '<div class="lane' + (flagged ? " origin" : "") + '"><div><div class="name">' + dev + '</div><div class="role">' + ROLE[dev] + '</div></div>' +
+         '<div class="plot" role="img" aria-label="' + dev + ' score per minute">' + bars + '</div>' +
+         '<div class="status">' + badge + (p.n > 12 ? '<div class="strikes' + (run >= 3 ? " full" : "") + '" title="minutes in a row over the line">' + strikes + '</div>' : "") + '</div></div>';
+}
+
+function side(key) {
+  if (key === "incident" || key === "contained") return '<h2>How it was found</h2><p class="hint">Measured from the traffic, not from the contents.</p>' +
+    '<div class="path"><div class="node bad">esp32-03<small>192.168.0.203</small></div><div class="wire"></div><div class="node">192.168.0.200:4444<small>never used in the baseline</small></div></div>' +
+    '<div class="facts"><div class="fact"><div class="v">' + (key === "contained" ? "7" : "6") + '</div><div class="k">new connections</div></div><div class="fact"><div class="v">every 30 s</div><div class="k">machine-regular timing</div></div>' +
+    '<div class="fact"><div class="v">496 bytes</div><div class="k">sent each time</div></div><div class="fact"><div class="v">3 of 3</div><div class="k">minutes over the line</div></div></div>' +
+    (key === "incident" ? '<div class="do"><h3>Do this now</h3><p>Isolate <b>esp32-03</b>: pull its power, or block MAC <span class="mono">30:76:f5:e5:e5:ac</span> on the router.</p></div>'
+                        : '<div class="do"><h3>Confirmed from the traffic</h3><p>Last connection to port 4444 at <b>19:33:19</b>. None in the 90 seconds after.</p></div>');
+  return '<h2>This session</h2><p class="hint">Capture on the wired adapter, a new file every 10 seconds.</p>' +
+    '<div class="facts"><div class="fact"><div class="v">' + (key === "learning" ? "7 of 12" : "12 of 12") + '</div><div class="k">baseline minutes</div></div><div class="fact"><div class="v">3</div><div class="k">devices judged</div></div>' +
+    '<div class="fact"><div class="v">0</div><div class="k">files unreadable</div></div><div class="fact"><div class="v">4.0</div><div class="k">alert line</div></div></div>' +
+    '<div class="do"><h3>Not seen in this capture</h3><p><span class="mono">esp32-01</span> is in the inventory but has sent nothing.</p></div>';
+}
+
+function show(key) {
+  const p = PH[key];
+  $("band").className = "band " + p.cls + (p.ring && !$("band").dataset.acked ? " ringing" : "");
+  $("state").innerHTML = ICON[p.cls] + p.state;  $("headline").innerHTML = p.head;  $("sub").innerHTML = p.sub;
+  $("clock").textContent = p.clock;
+  $("progress").classList.toggle("hide", p.progress === undefined);
+  if (p.progress !== undefined) $("progress").firstElementChild.style.width = p.progress + "%";
+  $("kpis").innerHTML = p.kpis.map(k => '<div class="kpi"><div class="v' + (k[2] ? " wait" : "") + '">' + k[0] + '</div><div class="k">' + k[1] + '</div></div>').join("");
+  $("ack").classList.toggle("hide", !(key === "incident" && !$("band").dataset.acked));
+  $("acked").classList.toggle("hide", !(p.acked || (key === "incident" && $("band").dataset.acked)));
+  $("lanes").innerHTML = Object.keys(SCORES).map(d => lane(d, p, key)).join("");
+  $("sidecard").innerHTML = side(key);
+  $("report").classList.toggle("hide", !(key === "incident" || key === "contained"));
+  $("steps").firstElementChild.classList.toggle("done", key === "contained");
+  $("axis-mid").style.visibility = p.n > 12 ? "visible" : "hidden";
+  document.querySelectorAll(".phasebar button").forEach(b => b.classList.toggle("on", b.dataset.p === key));
+  document.body.dataset.phase = key;
+}
+$("ack").onclick = () => { $("band").dataset.acked = "1"; show("incident"); };
+document.querySelectorAll(".phasebar button").forEach(b => b.onclick = () => { delete $("band").dataset.acked; show(b.dataset.p); });
+show(new URLSearchParams(location.search).get("phase") || "incident");
+</script>
+</body>
+</html>
