@@ -934,6 +934,20 @@ def with_containment(report: dict, containment: dict) -> dict:
     return report
 
 
+def with_analyst(report: dict, record: dict | None) -> dict:
+    """
+    The report with the AI analyst's latest answer (Step P4) - a new field
+    only. The summary in it is shown only when its status is "ok", i.e. it
+    passed the evidence check (src/analyst.py); see summary_and_source.
+    """
+    if not report or not record or report.get("status") in (None, "failed", "no incident"):
+        return report
+    report = dict(report)
+    report["analyst"] = {k: record.get(k) for k in ("status", "model", "summary", "stage",
+                                                    "seconds", "attempts")}
+    return report
+
+
 def wording_from_brief(report: dict, outcome) -> dict:
     """
     Add a language model's headline to section 1 - only if its brief passed
@@ -1076,7 +1090,10 @@ def summary_and_source(report: dict, addresses=None) -> tuple:
         return (analyst["summary"],
                 "Written by the AI analyst (%s). Every fact checked against the evidence."
                 % analyst.get("model", "cloud model"), True)
-    if analyst.get("status") in ("failed", "rejected", "unreachable", "no key"):
+    if analyst.get("status") == "rejected":
+        source = ("Template wording - the AI analyst's answer did not pass the evidence "
+                  "check.")
+    elif analyst.get("status") in ("failed", "unreachable", "no key"):
         source = "Template wording - the AI analyst was not reachable."
     elif analyst.get("status") == "asking":
         source = "Template wording - the AI analyst is being asked."
@@ -1245,7 +1262,8 @@ def design_facts(report: dict, addresses=None) -> dict:
                   "evidence connections before acting on anything irreversible.")
     facts["limits"] = limits
     facts["footer"] = ("Verdict and numbers: detection and attribution engine (V5). Wording: %s."
-                       % ("AI analyst, validated" if facts["by_ai"] else "template, from the measurements"))
+                       % ("AI analyst (%s), validated" % (report.get("analyst") or {}).get("model")
+                          if facts["by_ai"] else "template, from the measurements"))
     return facts
 
 
@@ -1357,7 +1375,7 @@ def render_html(report: dict, addresses=None) -> str:
         p.append("<div class='keys'>%s</div>" % "".join(
             "<div><div class='v'>%s</div><div class='k'>%s</div></div>" % (e(v), e(k))
             for v, k in f["keys"]))
-        p.append("<section><h2>What happened</h2><p class='summary'>%s</p>"
+        p.append("<section><h2>Analyst summary</h2><p class='summary'>%s</p>"
                  "<p class='source%s'>%s%s</p></section>"
                  % (e(f["summary"]), "" if f["by_ai"] else " tpl",
                     "&#10003; " if f["by_ai"] else "", e(f["source"])))

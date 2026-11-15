@@ -238,6 +238,42 @@ P3 as built (15 Nov 2026):
 - Tests: thread with a fake transport (pass, validator reject, timeout, no key) - the
   engine's state is identical in all four except the wording field.
 
+P4 as built (15 Nov 2026):
+- First real call (key from API_KEY.env, never printed): `report.CLOUD_MODEL`
+  = gemini-3.6-flash still answers - HTTP 200 in 8.0 s. No model change.
+  In a speed-20 replay of live_session_07 with `--llm cloud`: 5.7 s at the
+  alert, 5.0 s at STOP, both passed the check.
+- `src/analyst.py`: `analyst_facts` (device, its address, first unusual
+  connection time and id, destination address:port, interval, bytes sent and
+  received - nothing that changes minute to minute), `check_summary`
+  (report.validate_brief with exactly those facts allowed, plus: at most 3
+  sentences, no running count, no other lab device, names the device), `ask`
+  (25 s per attempt, one retry carrying the objections), `Analyst` (background
+  thread, cached as `pcap/live/<session>/analyst.json`; at STOP one more ask
+  inside one 25 s budget; if that fails, the alert's passing answer is kept
+  when its facts are the same).
+- Engine: `python -m src.live --session <name> [--replay ...] --llm cloud`.
+  The report and state gain `analyst` (status ok / asking / rejected /
+  unreachable / no key, model, summary) and the state `llm` and
+  `analyst_calls` (stage, status, seconds of each ask). Nothing else depends
+  on it: tests/test_p4.py replays live_session_07 four times (pass, rejected,
+  timeout, no key) and every state of every cycle is identical apart from
+  those fields.
+- Wording on the page and in the report, under "Analyst summary": "Written by
+  the AI analyst (gemini-3.6-flash). Every fact checked against the evidence."
+  / "Template wording - the AI analyst was not reachable." (offline, timeout,
+  no key) / "Template wording - the AI analyst's answer did not pass the
+  evidence check." (rejected twice) / "Template wording, built from the
+  measurements." (run without --llm). The summary is shown only with status ok.
+- Offline checked for real: with HTTPS_PROXY pointed at a closed port, both
+  asks fail in ~4 s and the report shows the template wording.
+- Past sessions: the writer defaults to cloud when API_KEY.env is present
+  (`app.default_writer`). The tests set IOT_NO_CLOUD=1 for the whole session
+  (tests/conftest.py) so no test can reach the real cloud - found while writing
+  P4: a function-scoped guard came too late for a module-scoped replay fixture.
+- README: the AI analyst and what leaves the laptop (no packet contents, no
+  Wi-Fi password).
+
 ### P5 - documents
 - `docs/HOW_IT_WORKS.md`: the viva guide, written from the code - the flow, what each
   terminal command starts, each file's job in one line, how detection and attribution

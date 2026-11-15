@@ -173,7 +173,7 @@ def test_the_designed_report_has_the_mockups_parts_and_no_broker():
     state = fixture("contained")
     page = incident.render_html(state["incident"], state["addresses"])
     for part in ("Attack started on", "to detect", "to acknowledge", "to contain",
-                 "What happened", "Timeline", "How it was found", "Why we believe it",
+                 "Analyst summary", "Timeline", "How it was found", "Why we believe it",
                  "Attack techniques seen (MITRE ATT&amp;CK)", "What to do",
                  "Evidence and limits", "Severity high", "Contained", "@page { size: A4"):
         assert part in page, part

@@ -145,7 +145,7 @@ from pathlib import Path
 import numpy as np
 import pandas as pd
 
-from src import attribute, capture, detect, incident, report, runs, windows
+from src import analyst, attribute, capture, detect, incident, report, runs, windows
 
 ROOT = capture.ROOT
 LIVE_DIR = ROOT / "pcap" / "live"
@@ -357,7 +357,8 @@ class LiveSession:
                  window_seconds: int = windows.WINDOW_SECONDS,
                  grace_seconds: float = GRACE_SECONDS,
                  data_dir: Path = runs.DATA_DIR,
-                 reader=None, reports_dir=None):
+                 reader=None, reports_dir=None, llm: str | None = None,
+                 analyst_transport=None):
         self.folder = Path(folder)
         self.session = session or self.folder.name
         self.window_seconds = int(window_seconds)
@@ -412,6 +413,15 @@ class LiveSession:
         self.replaying = False              # set by replay(): the recording's clock, not ours
         self.alert_wall_epoch = None        # this laptop's clock when the first alert was raised
         self.acknowledged = None            # the operator's acknowledgement (Step P2)
+        # Step P4: the AI analyst (--llm cloud). A background helper; the tick
+        # never waits for it and nothing but the report's "analyst" field
+        # depends on it.
+        self.llm = llm
+        self.analyst = (analyst.Analyst(self.folder, self.device_names,
+                                        transport=analyst_transport)
+                        if llm == "cloud" else None)
+        self._analyst_asked = False
+        self._analyst_changes = 0
 
         self.phase = WAITING
         self.stopped = False
@@ -665,6 +675,42 @@ class LiveSession:
         if self.acknowledged and self.incident:
             self.incident = incident.with_acknowledgement(self.incident, self.acknowledged)
 
+    def _analyst_record(self):
+        return None if self.analyst is None else self.analyst.current()
+
+    def _tend_analyst(self) -> bool:
+        """
+        Step P4. Once the first alert is raised (and the report has its new
+        destination), ask the AI analyst in the background - once. Every
+        cycle, copy its latest answer into the report (rebuilt every minute).
+        Returns True when the answer changed, so the HTML report is rewritten.
+        """
+        if self.analyst is None or not self.incident or \
+                self.incident.get("status") in (None, "failed", "no incident"):
+            return False
+        if self.first_alert is not None and not self._analyst_asked:
+            facts = analyst.analyst_facts(self.incident, self.addresses)
+            if facts is not None:
+                self.analyst.ask_in_background(facts, stage="alert")
+                self._analyst_asked = True
+        record = self._analyst_record()
+        self.incident = incident.with_analyst(self.incident, record)
+        changed = self.analyst.changes != self._analyst_changes
+        self._analyst_changes = self.analyst.changes
+        return changed
+
+    def _analyst_at_stop(self) -> None:
+        """Ask once more for the final report (one 25 s budget), then attach."""
+        if self.analyst is None or not self.incident or \
+                self.incident.get("status") in (None, "failed", "no incident"):
+            return
+        facts = analyst.analyst_facts(self.incident, self.addresses)
+        if facts is not None:
+            self.analyst.ask_at_stop(facts)
+            self._analyst_asked = True
+        self.incident = incident.with_analyst(self.incident, self._analyst_record())
+        self._analyst_changes = self.analyst.changes
+
     def _record_verdict(self, now: float) -> None:
         """Log the verdict whenever it changes, with the capture time it changed."""
         if not self.detection.onsets:
@@ -733,6 +779,8 @@ class LiveSession:
             self._check_containment()
         found = self._read_acknowledgement()
         self._attach_acknowledgement()
+        if self._tend_analyst():
+            found = True
         if found:
             self._write_report()
         self._log_phase(self._decide_phase())
@@ -760,6 +808,7 @@ class LiveSession:
             self._check_containment()
             self._read_acknowledgement()
             self._attach_acknowledgement()
+            self._analyst_at_stop()
             self._write_report()
             self._write_pdf()
             if save:
@@ -801,6 +850,7 @@ class LiveSession:
             "containment": self.containment,
             "evidence": self.evidence,
             "acknowledged": self.acknowledged,
+            "analyst": self._analyst_record(),
         }
         meta_file.write_text(json.dumps(json_safe(meta), indent=2), encoding="utf-8")
         self.saved = (parquet_file, meta_file)
@@ -900,6 +950,11 @@ class LiveSession:
             "acknowledged": self.acknowledged,
             "first_alert_wall_epoch": self.alert_wall_epoch,
             "replaying": self.replaying,
+            # Step P4: the AI analyst's latest answer (wording only), and
+            # whether it was asked for at all.
+            "llm": self.llm,
+            "analyst": self._analyst_record(),
+            "analyst_calls": [] if self.analyst is None else list(self.analyst.calls),
             "verdict_changes": self.verdict_changes,
             "phase_log": self.phase_log,
             "problems": self.problems,
@@ -1028,7 +1083,8 @@ def _prepare_folder(folder: Path, force: bool, join: bool = False) -> bool:
     if join and capture_is_recording(folder):
         return True
     leftovers = ring_files(folder) + [p for p in (folder / STATE_FILE, folder / STOP_FILE,
-                                                  folder / ACK_FILE)
+                                                  folder / ACK_FILE,
+                                                  folder / analyst.ANALYST_FILE)
                                       if p.exists()]
     if leftovers and not force:
         raise FileExistsError(
@@ -1045,7 +1101,8 @@ def _prepare_folder(folder: Path, force: bool, join: bool = False) -> bool:
 def replay(pcap_path, session: str, folder=None, baseline_seconds: float = DEFAULT_BASELINE,
            speed: float = 20.0, data_dir: Path = runs.DATA_DIR, force: bool = False,
            save: bool = True, editcap: str | None = None, tshark: str | None = None,
-           on_cycle=None, quiet: bool = False) -> LiveSession:
+           on_cycle=None, quiet: bool = False, llm: str | None = None,
+           analyst_transport=None) -> LiveSession:
     """
     Play a recorded capture through the live path, as if it were happening now.
 
@@ -1065,7 +1122,8 @@ def replay(pcap_path, session: str, folder=None, baseline_seconds: float = DEFAU
 
     sources = split_capture(pcap_path, folder / REPLAY_SOURCE, editcap=editcap, tshark=tshark)
     live = LiveSession(folder, baseline_seconds=baseline_seconds, session=session,
-                       tshark=tshark, data_dir=data_dir)
+                       tshark=tshark, data_dir=data_dir, llm=llm,
+                       analyst_transport=analyst_transport)
     live.replaying = True
     gap = SEGMENT_SECONDS / speed if speed and speed > 0 else 0.0
     last_print = None
@@ -1100,7 +1158,7 @@ def replay(pcap_path, session: str, folder=None, baseline_seconds: float = DEFAU
 def run_live(session: str, folder=None, baseline_seconds: float = DEFAULT_BASELINE,
              data_dir: Path = runs.DATA_DIR, poll_seconds: float = POLL_SECONDS,
              quiet_seconds: float = QUIET_SECONDS, force: bool = False,
-             tshark: str | None = None) -> LiveSession:
+             tshark: str | None = None, llm: str | None = None) -> LiveSession:
     """
     Watch the session folder until STOP, Ctrl+C, or 30 s with no new file.
     """
@@ -1111,7 +1169,7 @@ def run_live(session: str, folder=None, baseline_seconds: float = DEFAULT_BASELI
     joined = _prepare_folder(folder, force, join=True)
 
     live = LiveSession(folder, baseline_seconds=baseline_seconds, session=session,
-                       tshark=tshark, data_dir=data_dir)
+                       tshark=tshark, data_dir=data_dir, llm=llm)
     live.write()
     print("\n  watching %s" % folder)
     if joined:
@@ -1198,18 +1256,25 @@ def main(argv=None) -> int:
                         help="clear an existing session folder / overwrite data/<session>")
     parser.add_argument("--tshark", default=None)
     parser.add_argument("--editcap", default=None)
+    parser.add_argument("--llm", choices=["cloud"], default=None,
+                        help="also ask the AI analyst (cloud model, key in API_KEY.env) for the "
+                             "summary; checked against the evidence, never blocks (Step P4)")
     args = parser.parse_args(argv)
+    if args.llm == "cloud" and not analyst.key_available():
+        print("\n  --llm cloud: %s not found or has no GEMINI_API_KEY line - the report "
+              "will use the template wording.\n" % report.API_KEY_FILE, file=sys.stderr)
 
     try:
         if args.replay:
             live = replay(args.replay, args.session, folder=args.folder,
                           baseline_seconds=args.baseline, speed=args.speed,
-                          force=args.force, editcap=args.editcap, tshark=args.tshark)
+                          force=args.force, editcap=args.editcap, tshark=args.tshark,
+                          llm=args.llm)
         else:
             live = run_live(args.session, folder=args.folder,
                             baseline_seconds=args.baseline, poll_seconds=args.poll,
                             quiet_seconds=args.quiet_stop, force=args.force,
-                            tshark=args.tshark)
+                            tshark=args.tshark, llm=args.llm)
     except (FileNotFoundError, FileExistsError, ValueError, RuntimeError) as exc:
         print("\n  %s\n" % exc, file=sys.stderr)
         return 1

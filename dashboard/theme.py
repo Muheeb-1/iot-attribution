@@ -995,7 +995,8 @@ def report_summary_card(facts: dict) -> str:
                    % (css, esc(v), esc(k)) for v, k, css in report_keys(facts))
     return ('<div class="iot card"><div class="ctitle">Incident report</div>'
             '<div class="hint">Severity rule: %s</div><div class="rkeys">%s</div>'
-            '<p class="summary">%s</p><div class="source%s">%s%s</div></div>'
+            '<div class="ctitle" style="margin-top:16px;font-size:15px">Analyst summary</div>'
+            '<p class="summary" style="margin-top:6px">%s</p><div class="source%s">%s%s</div></div>'
             % (esc(facts.get("severity_rule", "")), keys, esc(facts.get("summary", "")),
                " ai" if facts.get("by_ai") else "", "&#10003; " if facts.get("by_ai") else "",
                esc(facts.get("source", ""))))

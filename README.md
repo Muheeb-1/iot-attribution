@@ -347,6 +347,21 @@ compared the local `llama3.2:3b` (today's default) with cloud Gemini on two real
 the limit: the validator stops *invention*, not *error*. When the analysis is wrong
 (old-rule `live_batch_05`), a correct brief is a fluent account of the wrong device.
 
+**The AI analyst on the live page** (`src/analyst.py`, polish step P4). Started with
+`python -m src.live --session <name> --llm cloud`: at the first alert, a background thread asks
+the cloud model (`gemini-3.6-flash`) for a 2-3 sentence "Analyst summary" (25 s limit, one
+retry; asked once more at STOP). It is given only facts that do not change minute to minute
+(device, time of the first unusual connection, destination and port, interval, bytes), and its
+answer is shown only if it passes `report.validate_brief` plus two extra rules (no running
+counts, no other device). Otherwise the page and the report say "Template wording - the AI
+analyst was not reachable" and show the template's sentences. The verdict, the numbers and
+the playbook never come from the model, and the engine never waits for it.
+
+**What leaves the laptop** when the cloud model is used (the AI analyst, or the Past sessions
+page's cloud writer): device names, MAC and IP addresses, ports, clock times, byte counts and
+connection ids. **No packet contents and no Wi-Fi password** are ever sent. The key stays in
+`API_KEY.env` (gitignored) and is never printed, logged or saved.
+
 ## Getting started
 
 ```powershell

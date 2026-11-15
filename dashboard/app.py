@@ -56,6 +56,7 @@ from __future__ import annotations
 
 import json
 import math
+import os
 import re
 import sys
 from pathlib import Path
@@ -421,8 +422,24 @@ WRITERS = {
 
 
 def cloud_key_present() -> bool:
-    """Is the cloud key file there? Checked only to warn; it is never opened here."""
+    """
+    Is the cloud key file there? Checked only to choose and warn; it is never
+    opened here. IOT_NO_CLOUD=1 (set by the tests) means "behave as if there is
+    no key", so no test can ever reach the real cloud.
+    """
+    if os.environ.get("IOT_NO_CLOUD"):
+        return False
     return (ROOT / report.API_KEY_FILE).exists() or Path(report.API_KEY_FILE).exists()
+
+
+def default_writer() -> str:
+    """
+    Step P4: the cloud model writes the brief by default when a key is
+    present (it is checked against the evidence and falls back to the
+    template); with no key, the template. The local model is never the
+    default - it took 45+ minutes per answer on this laptop.
+    """
+    return "cloud" if cloud_key_present() else "template"
 
 
 @st.cache_data(show_spinner=False)
@@ -501,7 +518,8 @@ def replay_page() -> None:
 
         st.header("Who writes the brief")
         writer = st.radio(
-            "Brief written by", list(WRITERS), format_func=WRITERS.get, index=0,
+            "Brief written by", list(WRITERS), format_func=WRITERS.get,
+            index=list(WRITERS).index(default_writer()),
             help="The analysis is identical whichever you pick. A model only "
                  "rewords it, is checked against the evidence, and falls back "
                  "to the template if it invents anything.",
