@@ -128,10 +128,13 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   (`docs/HOW_IT_WORKS.md`, `docs/LIVE_DEMO.md` v2), saved reports 01-07 re-created in the new
   design (`python -m src.incident <session> --pdf`; old ones in gitignored
   `reports/old_design/` - reports/ was never in git), test outputs (demo_*, test_*) gitignored.
-- P5 interpreting prompt (`analyst.PROMPT_P5`): 7/10 real calls passed (3 refused by the
-  server, all 7 answers passed) -> NOT live by the 8/10 rule; `PROMPT_P4` stays live. Do not
-  switch without a new measurement and Muheeb's approval.
-- Tests: 693+ passed, 6 skipped. `tests/conftest.py` sets IOT_NO_CLOUD=1 and WRITE_PDF off for
+- P5 interpreting prompt (`analyst.PROMPT_P5`): 7/10 rapid real calls passed (3 refused by
+  the server, all 7 answers passed) -> not adopted then. P5b (tag polish-p5b): tightened to
+  <= 4 sentences / 650 characters / one hedge at a time, 5 s wait after HTTP 429, re-measured
+  one call a minute: 6/6 passed, 1.6-5.2 s -> `PROMPT_P5` is LIVE (`PROMPT_P4` kept). The
+  engine re-asks if another device is flagged later. Do not change the live prompt without a
+  new measurement and Muheeb's approval.
+- Tests: 720 passed, 6 skipped (P5b). `tests/conftest.py` sets IOT_NO_CLOUD=1 and WRITE_PDF off for
   the WHOLE session (never reach the real cloud from a test). Scoring is re-run into a scratch
   folder and compared; `results/table1_per_run.csv` and `table_live_per_run.csv` are left as
   they are (a re-run only adds the Step 18 columns).

@@ -6,7 +6,10 @@ WHAT IT DOES
 ------------
 When the live engine raises its first alert (and once more at STOP), this file
 sends the cloud model a handful of facts about the incident and asks for a
-2-3 sentence summary a non-expert can read. The answer is shown on the page and
+summary a non-expert can read: at most 4 sentences that say what the device did,
+what that pattern usually means and why it matters, whether any other device
+changed, and one thing to check next (PROMPT_P5, live since P5b; the P4 prompt,
+which only restated the numbers, is kept). The answer is shown on the page and
 in the report ONLY if it passes the same evidence check every model text in this
 project passes (report.validate_brief); otherwise the report keeps its template
 wording and says so.
@@ -24,9 +27,13 @@ The summary sits beside cards that update every 3 seconds. If it said "7
 connections so far" it would disagree with them a minute later. So the model is
 given only facts that are fixed once the alert is raised: the device, the time
 of its first unusual connection, the destination address and port, the interval
-between connections, and the bytes sent and received each time. No running
-counts, no scores, no confidence, nothing about other devices. A summary that
-mentions a running count or another lab device is rejected.
+between connections, the bytes sent and received each time, whether the timing
+is machine-regular, and which other devices were flagged ("none" is a fact). No
+running counts, no scores, no confidence. A summary that mentions a running
+count, a lab device that was not flagged, two stacked hedges ("may likely"), or
+something the measurements cannot show (passwords, stolen data, a named
+attacker) is rejected. If another device is flagged later, the engine asks
+again, so "no other device changed" can never stay on screen wrongly.
 
 WHAT IT CAN NEVER DO
 --------------------
@@ -46,7 +53,8 @@ written to analyst.json.
 THE LIMITS
 ----------
 25 s per attempt, one retry (with the validator's objections, so the model can
-fix them). At STOP the whole ask has one 25 s budget, so a hanging network can
+fix them). If the server says "too many requests" (HTTP 429) the retry waits
+5 s first, inside its own 25 s. At STOP the whole ask has one 25 s budget, so a hanging network can
 delay the final report by 25 s at most. The answer is cached as
 pcap/live/<session>/analyst.json.
 """
@@ -68,8 +76,11 @@ MODEL = report.CLOUD_MODEL
 LIMIT_SECONDS = 25.0          # per attempt
 ATTEMPTS = 2                  # one try, one retry
 STOP_BUDGET_SECONDS = 25.0    # the whole ask at STOP
-MAX_SENTENCES = 3             # PROMPT_P5 needs 5 and 900 characters (see SYSTEM_PROMPT)
-MAX_CHARACTERS = 600
+RATE_LIMIT_WAIT = 5.0         # P5b: after "HTTP 429 too many requests", before the retry
+# The live prompt's limits (PROMPT_P5: P5_MAX_SENTENCES / P5_MAX_CHARACTERS,
+# defined with it below; PROMPT_P4 was checked at 3 and 600).
+MAX_SENTENCES = 4
+MAX_CHARACTERS = 650
 
 # statuses of an analyst record
 ASKING = "asking"
@@ -97,23 +108,28 @@ levels, or anything about other devices. Do NOT recommend actions."""
 # The P5 prompt: interprets the measured pattern - what a small, same-size
 # message to a new address on a fixed timer usually means, why it matters,
 # whether any other device changed, and one thing to check next - without
-# inventing contents, an attacker or a method. Measured on 15 Nov 2026 with
-# 10 real calls (live_session_07 and _03 facts); see docs/POLISH_PLAN.md, P5.
+# inventing contents, an attacker or a method. First measured on 15 Nov 2026
+# with 10 rapid real calls (P5); tightened in P5b to at most 4 sentences /
+# ~650 characters and one hedge word at a time, and measured again the way a
+# real session calls (6 calls, one a minute). See docs/POLISH_PLAN.md, P5/P5b.
+P5_MAX_SENTENCES = 4
+P5_MAX_CHARACTERS = 650
 PROMPT_P5 = """You are the analyst on a network security console. Write the \
 "Analyst summary" of one incident for a site manager who is not a security expert.
 
-Write 3 to 5 short, plain sentences that:
+Write AT MOST 4 short, plain sentences - about 600 characters in all, never more \
+than 650:
 1. Say what the device did: from the time of its first unusual connection it \
 connected to the destination address and port on a fixed timer, sending a small \
 message of about the same size each time, to an address it never used while its \
 normal behaviour was being learned.
-2. Explain what that pattern usually means: a small, same-size message sent on a \
-fixed timer to a new address is the typical sign of a compromised device checking \
-in or reporting to a server that someone else controls (often called beaconing).
-3. Say why it matters: whoever receives these messages may be able to collect \
-data from the device or send it commands.
-4. Say whether any other device changed its behaviour, using the facts given.
-5. Suggest ONE thing to check next, such as what is listening at the destination \
+2. Explain what that pattern usually means and why it matters: a small, same-size \
+message sent on a fixed timer to a new address is the typical sign of a compromised \
+device checking in or reporting to a server that someone else controls (often called \
+beaconing), so whoever receives these messages could collect data from the device or \
+send it commands.
+3. Say whether any other device changed its behaviour, using the facts given.
+4. Suggest ONE thing to check next, such as what is listening at the destination \
 address, or whether the device's firmware has been changed.
 
 STRICT RULES:
@@ -122,17 +138,22 @@ it, or how the device was compromised.
 - Write the time, addresses and numbers exactly as given; add no other times, \
 numbers, devices or addresses.
 - No counts of connections, packets or minutes, no scores, no confidence levels.
-- When you interpret, say "usually", "likely" or "consistent with"; never present \
-the interpretation as proven."""
+- When you interpret, use ONE of "usually", "likely" or "consistent with" - one at a \
+time, never two together (not "may likely", not "usually consistent with"); never \
+present the interpretation as proven."""
 
-# WHICH PROMPT IS LIVE. The rule set for P5: keep PROMPT_P5 only if at least
-# 8 of 10 real calls pass. Measured 15 Nov 2026: 7 of 10. All 7 answers that
-# came back passed the check; the 3 failures were the server refusing the
-# request within ~0.6 s (no answer at all - most likely the free tier's rate
-# limit after calls in quick succession; the status code was not recorded
-# then, it is now). By the rule, PROMPT_P4 stays live. To switch after a new
-# measurement: SYSTEM_PROMPT = PROMPT_P5, MAX_SENTENCES = 5, MAX_CHARACTERS = 900.
-SYSTEM_PROMPT = PROMPT_P4
+# WHICH PROMPT IS LIVE.
+#  P5 (15 Nov): 10 rapid calls, 7 passed - all 7 answers passed the check; the 3
+#    failures were refusals within ~0.6 s (most likely the free plan's rate limit
+#    after calls in quick succession). Rule: >= 8 of 10, so PROMPT_P4 stayed live.
+#  P5b (15 Nov): PROMPT_P5 tightened (<= 4 sentences, <= 650 characters, one
+#    hedge at a time), then measured the way a real session calls - 6 calls,
+#    one a minute, live_session_07 and _03 facts: 6 of 6 came back and passed
+#    the check, 1.6-5.2 s each, 473-605 characters, 4 sentences each
+#    (tests/fixtures/analyst_p5b_trial.json). Rule: all 6 -> PROMPT_P5 is live.
+#  A real session makes 2 calls, minutes apart (alert, STOP), plus one more only
+#  if another device is flagged later. PROMPT_P4 is kept for the record.
+SYSTEM_PROMPT = PROMPT_P5
 
 
 # --------------------------------------------------------------------------
@@ -194,6 +215,12 @@ UNSUPPORTED_CLAIM = re.compile(
     r"nation[- ]state|state[- ]sponsored|hacker group|stole|stolen|steals?|"
     r"personal data|camera|microphone)\b", re.I)
 
+# P5b: one hedge at a time - "may likely", "usually consistent with" read badly
+# and say less, not more.
+STACKED_HEDGE = re.compile(
+    r"\b(?:(?:may|might|could|would)\s+likely|likely\s+(?:may|might|could)|"
+    r"(?:usually|likely|probably)\s+consistent\s+with)\b", re.I)
+
 RUNNING_COUNT = re.compile(r"\b\d[\d,]*\s+(?:[a-z-]+\s+)?(?:connections?|packets?|beacons?|"
                            r"times|attempts?|minutes?|messages?)\b", re.I)
 SENTENCE_END = re.compile(r"[.!?](?:\s|$)")
@@ -214,6 +241,9 @@ def check_summary(summary: str, facts: dict, device_names) -> list:
         problems.append("longer than %d sentences" % MAX_SENTENCES)
     for match in RUNNING_COUNT.findall(text):
         problems.append("states a running count (%r), which changes minute to minute" % match)
+    for match in STACKED_HEDGE.findall(text):
+        problems.append("stacks two hedges (%r); use one of usually / likely / consistent with"
+                        % match)
     for match in UNSUPPORTED_CLAIM.findall(text):
         problems.append("claims %r, which the measurements cannot show" % match)
     lowered = text.lower()
@@ -309,7 +339,7 @@ def _user_prompt(facts: dict, problems=None) -> str:
 def ask(facts: dict, device_names, transport=None, model: str = MODEL,
         attempts: int = ATTEMPTS, limit: float = LIMIT_SECONDS,
         budget: float | None = None, clock=time.monotonic,
-        system: str | None = None) -> dict:
+        system: str | None = None, sleep=time.sleep) -> dict:
     """
     Ask once (plus one retry). Returns the analyst record:
       status   ok / rejected / unreachable / no key
@@ -327,6 +357,7 @@ def ask(facts: dict, device_names, transport=None, model: str = MODEL,
         transport = cloud_transport
     problems = None
     answered = False
+    waited = 0.0
     for attempt in range(1, attempts + 1):
         timeout = limit
         if budget is not None:
@@ -334,6 +365,8 @@ def ask(facts: dict, device_names, transport=None, model: str = MODEL,
             if timeout <= 0.5:
                 break
         record["attempts"] = attempt
+        if waited:
+            timeout = max(0.5, timeout - waited)    # the wait counts inside this attempt's limit
         try:
             summary = transport(model, system or SYSTEM_PROMPT, _user_prompt(facts, problems),
                                 timeout)
@@ -342,10 +375,20 @@ def ask(facts: dict, device_names, transport=None, model: str = MODEL,
             # server refused ("HTTP 429"), which cloud_transport puts in its
             # own message and which never carries the key or the reply body.
             why = type(exc).__name__
-            if isinstance(exc, RuntimeError) and str(exc).startswith("HTTP "):
+            refused = isinstance(exc, RuntimeError) and str(exc).startswith("HTTP ")
+            if refused:
                 why += ", " + str(exc)[:12]
             record["problems"].append("attempt %d: no answer (%s)" % (attempt, why))
+            # P5b: "too many requests" - wait a moment before the one retry,
+            # inside the retry's own 25 s (and inside the STOP budget).
+            waited = 0.0
+            if refused and str(exc).startswith("HTTP 429") and attempt < attempts:
+                if budget is not None and budget - (clock() - started) - RATE_LIMIT_WAIT <= 0.5:
+                    break
+                sleep(RATE_LIMIT_WAIT)
+                waited = RATE_LIMIT_WAIT
             continue
+        waited = 0.0
         answered = True
         problems = check_summary(summary, facts, device_names)
         if not problems:

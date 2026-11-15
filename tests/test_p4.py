@@ -88,7 +88,7 @@ def test_a_faithful_summary_passes():
     (GOOD.replace("esp32-03", "the board"), "does not name"),
     (GOOD + " Then evil-c2-box9 took over.", "not a real device"),
     ("", "empty"),
-    ("One. Two. Three. Four esp32-03.", "longer"),
+    ("One. Two. Three. Four. Five esp32-03.", "longer"),     # P5b: at most 4
 ])
 def test_an_unfaithful_summary_is_rejected(bad, why):
     problems = analyst.check_summary(bad, FACTS, NAMES)

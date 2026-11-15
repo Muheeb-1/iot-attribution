@@ -230,9 +230,11 @@ all traffic passes through it, and stage an attack that spreads between boards.
 No. The report - verdict, numbers, timeline, techniques, what to do - is built from the
 measurements and is complete without any model. With `--llm cloud` a cloud model
 (gemini-3.6-flash) writes only the short **Analyst summary**, from a handful of fixed facts
-(device, time, address and port, interval, bytes). Every name, time and number in its text is
-checked against those facts before it is shown; anything else is thrown away and the template
-wording is shown, labelled as such. No packet contents and no Wi-Fi password are sent.
+(device, time, address and port, interval, bytes, whether anything else changed). It explains
+what the pattern usually means and suggests one thing to check, in at most 4 sentences. Every
+name, time and number in its text is checked against those facts before it is shown;
+anything else is thrown away and the template wording is shown, labelled as such. Measured
+6 of 6 passing, 1.6-5.2 s. No packet contents and no Wi-Fi password are sent.
 
 **Other questions that come up**
 

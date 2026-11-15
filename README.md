@@ -373,17 +373,22 @@ the limit: the validator stops *invention*, not *error*. When the analysis is wr
 
 **The AI analyst on the live page** (`src/analyst.py`, polish step P4). Started with
 `python -m src.live --session <name> --llm cloud`: at the first alert, a background thread asks
-the cloud model (`gemini-3.6-flash`) for a 2-3 sentence "Analyst summary" (25 s limit, one
-retry; asked once more at STOP). It is given only facts that do not change minute to minute
-(device, time of the first unusual connection, destination and port, interval, bytes), and its
-answer is shown only if it passes `report.validate_brief` plus two extra rules (no running
-counts, no other device). Otherwise the page and the report say "Template wording - the AI
-analyst was not reachable" and show the template's sentences. The verdict, the numbers and
-the playbook never come from the model, and the engine never waits for it. A second prompt
-that also *interprets* the pattern (what a small fixed-size message on a timer usually means,
-why it matters, one thing to check next) was measured in P5: 7 of 10 real calls passed - every
-answer that came back passed the check, 3 requests were refused by the server - so by the rule
-set beforehand (8 of 10) it is kept in `src/analyst.py` as `PROMPT_P5` but is not live.
+the cloud model (`gemini-3.6-flash`) for an "Analyst summary" of at most 4 sentences
+(650 characters): what the device did, what that pattern *usually* means (a small,
+same-size message on a fixed timer to a new address is the typical sign of a compromised
+device checking in with a server someone else controls) and why it matters, whether any
+other device changed, and one thing to check next. 25 s limit, one retry (after an HTTP 429
+it waits 5 s first); asked once more at STOP, and again if another device is flagged later.
+It is given only facts that do not change minute to minute (device, time of the first unusual
+connection, destination and port, interval, bytes, timing regularity, other flagged devices),
+and its answer is shown only if it passes `report.validate_brief` plus the extra rules (no
+running counts, no unflagged device, no claim the measurements cannot show, one hedge at a
+time). Otherwise the page and the report say "Template wording - the AI analyst was not
+reachable" and show the template's sentences. The verdict, the numbers and the playbook never
+come from the model, and the engine never waits for it. Measured (P5b) the way a session
+calls - 6 calls, one a minute: **6 of 6 passed, 1.6-5.2 s**. (A looser first version passed 7
+of 10 rapid calls in P5 - the 3 failures were refusals of calls seconds apart - and was not
+adopted then.)
 
 **What leaves the laptop** when the cloud model is used (the AI analyst, or the Past sessions
 page's cloud writer): device names, MAC and IP addresses, ports, clock times, byte counts and
@@ -527,3 +532,4 @@ and measurements for Steps 15-22 are in `docs/LIVE_PLAN.md`.
 | P3 | Polish: designed 2-page report + PDF; severity, incident id, ATT&CK techniques; addresses shown, not "broker" | PDF ~3 s with Edge |
 | P4 | Polish: the AI analyst (cloud), fact-checked; template wording when offline | 2-9 s per call |
 | P5 | Polish: documents; saved reports re-created in the new design; a prompt that interprets, measured and not adopted (7/10) | |
+| P5b | The interpreting prompt tightened (4 sentences, 650 characters), 5 s wait after HTTP 429; re-measured one call a minute | 6/6 passed, 1.6-5.2 s - now live |

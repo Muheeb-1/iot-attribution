@@ -321,6 +321,38 @@ P5 as built (15 Nov 2026):
   console, the ladder with the new rung 4). README and CLAUDE.md brought up to date.
 - Tests: `tests/test_p5.py`.
 
+### P5b - the interpreting prompt, tightened and measured the way a session calls
+
+P5b as built (15 Nov 2026):
+- `PROMPT_P5` tightened: at most 4 sentences, about 600 and never more than 650 characters
+  (the check uses 4 / 650: `P5_MAX_SENTENCES`, `P5_MAX_CHARACTERS`); "why it matters" folded
+  into the meaning sentence; ONE of "usually" / "likely" / "consistent with" at a time. The
+  check rejects stacked hedges ("may likely", "usually consistent with") - six of P5's seven
+  answers had one. Everything else about the prompt is unchanged.
+- After "HTTP 429" the one retry waits 5 s (`RATE_LIMIT_WAIT`), and the wait counts inside the
+  retry's 25 s (its own timeout drops to 20 s) and inside the 25 s STOP budget. Other refusals
+  and timeouts retry at once.
+- Measured the way a real session calls: 6 real calls, one every 60 s, alternating
+  live_session_07 and live_session_03 facts, one attempt each, with the P5 limits:
+
+  | call | facts | result | seconds | characters | sentences |
+  |---|---|---|---|---|---|
+  | 1 | live_session_07 | passed | 1.95 | 605 | 4 |
+  | 2 | live_session_03 | passed | 1.88 | 487 | 4 |
+  | 3 | live_session_07 | passed | 5.20 | 531 | 4 |
+  | 4 | live_session_03 | passed | 1.64 | 497 | 4 |
+  | 5 | live_session_07 | passed | 1.94 | 473 | 4 |
+  | 6 | live_session_03 | passed | 1.78 | 539 | 4 |
+
+  No failure, so no HTTP code to record. All 6 came back and passed -> by the rule, **PROMPT_P5
+  is live** with the 4 / 650 limits (`tests/fixtures/analyst_p5b_trial.json`).
+- Because the live summary now says whether any other device changed, the engine asks again
+  if the set of other flagged devices changes later in the incident (`live._tend_analyst`),
+  so the summary cannot disagree with the cards. A normal session still makes 2 calls.
+- Docs: HOW_IT_WORKS (the AI section, the numbers, the test count; also corrected: a summary
+  rejected twice is labelled "...did not pass the evidence check", not "not reachable"),
+  LIVE_DEMO Q&A, README, CLAUDE.md. Tests: `tests/test_p5b.py`.
+
 ### P6 - two dress rehearsals on the hardware, then freeze
 - `rehearsal_03` (esp32-02) and `rehearsal_04` (esp32-03), following `docs/LIVE_DEMO.md`
   word for word, with sound, Acknowledge, unplug, CONTAINED, PDF. In one of them also do

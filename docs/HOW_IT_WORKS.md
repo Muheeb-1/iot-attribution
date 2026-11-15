@@ -1,6 +1,6 @@
 # How it works - a guide for the viva
 
-Written 15 Nov 2026 from the code at tag `polish-p5`. Read this once, slowly, before the viva.
+Written 15 Nov 2026 from the code at tag `polish-p5b`. Read this once, slowly, before the viva.
 Every number in it was measured; where a number comes from is said next to it.
 
 ---
@@ -72,7 +72,7 @@ Other commands you may be asked about:
 | `python -m src.incident live_session_07 --pdf` | Rebuilds the incident report for a saved session, as HTML and PDF. |
 | `python -m src.evaluate ...` | Scores the method against the answer files. It is the **only** program allowed to open them. |
 | `python -m src.generate --runs 30` | Makes simulated incidents with a known answer (the benchmark). |
-| `python -m pytest` | Runs all the tests (693 at P4). |
+| `python -m pytest` | Runs all the tests (720 passed, 6 skipped at P5b). |
 
 ---
 
@@ -174,9 +174,24 @@ If the engine could read that file, every result would be fake. Four things prev
 ## 7. What the AI does, and what it does not do
 
 **What it does.** With `--llm cloud`, when the alert is raised, the engine asks a cloud model
-(`gemini-3.6-flash`) for a short "Analyst summary" in plain English. It runs in the
-background, with a limit of 25 s and one retry, and is asked once more when the session
-stops. Real calls took about 2 to 9 s.
+(`gemini-3.6-flash`) for a short "Analyst summary" in plain English: at most 4 sentences
+(650 characters). The summary covers:
+- what the device did
+- what that pattern **usually** means: a small, same-size message on a fixed timer to a new
+  address is the typical sign of a compromised device checking in with a server someone else
+  controls
+- why it matters: whoever receives the messages could collect data or send commands
+- whether any other device changed
+- one thing to check next
+
+It runs in the background, with a limit of 25 s and one retry. If the server says "too many
+requests" (HTTP 429), the retry waits 5 s first. It is asked once more when the session stops,
+and once more if another device is flagged later. So a session makes 2 calls, minutes apart.
+
+Measured the way a session calls (6 calls, one a minute, 15 Nov): **6 of 6 passed the fact
+check, 1.6 to 5.2 s each.** An earlier, looser version passed 7 of 10 rapid calls. The 3
+failures were the server refusing calls made seconds apart. That version also stacked
+hedges ("may likely"), which the checker now refuses.
 
 **What it is given.** Only facts that do not change minute to minute:
 - the device and its address
@@ -190,14 +205,18 @@ It gets no packet contents and no Wi-Fi password.
 **How it is checked.** Before anything is shown, the answer goes through the project's fact
 checker. Every device name, time, port and byte figure in it must be one of the facts it was
 given. Running counts are refused, because they would be out of date a minute later. Claims
-the measurements cannot show (passwords, stolen data, a named attacker) are refused too. If
-the check fails twice, or the internet is down, the page and the report say "Template
-wording - the AI analyst was not reachable" and show the sentences built from the
-measurements.
+the measurements cannot show (passwords, stolen data, a named attacker) are refused too, and
+so are two hedges stacked together ("may likely"). The interpretation is always worded as
+"usually", "likely" or "consistent with", never as proven.
+
+If the internet is down, the page and the report say "Template wording - the AI analyst was
+not reachable". If the answer fails the check twice, they say "...did not pass the evidence
+check". Either way they show the sentences built from the measurements.
 
 **What it never does.** It does not detect, rank, decide the severity, choose the playbook
 or contain anything. The verdict, every number and every recommended step come from the
-code above. Without the AI the report is complete. The AI only words the summary.
+code above. Without the AI the report is complete. The AI only words, and explains, the
+summary.
 
 ---
 
@@ -263,7 +282,7 @@ it says "Contained at hh:mm:ss". This was confirmed for real in all 6 live sessi
 | False alarms | 0 in 24 attack-free 25-minute sessions (old rule: 1) | `results/false_alarms_fixed.csv` |
 | Hard simulated benchmark | V5 56.7% top-1, 90% top-3; "first to go odd" 17% | `results/table1.csv` |
 | "Blame the biggest sender" on real attacks | 0% | same tables |
-| AI summary | gemini-3.6-flash, 2-9 s per call; shown only if it passes the fact check | P4/P5 measurements |
+| AI summary | gemini-3.6-flash: 6 of 6 passed the fact check, 1.6-5.2 s each (one call a minute, as in a session) | P5b measurement |
 
 ---
 

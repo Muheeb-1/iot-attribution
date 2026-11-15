@@ -70,23 +70,31 @@ def test_a_device_that_was_flagged_may_be_named_and_one_that_was_not_may_not():
     assert not any("another device" in p for p in analyst.check_summary(text, spread, NAMES))
 
 
-def test_the_p4_prompt_stays_live_because_p5_passed_7_of_10():
+def test_the_first_p5_measurement_was_7_of_10_and_kept_p4_live_then():
+    # P5's rule (8 of 10) kept PROMPT_P4 live; P5b measured the tightened prompt
+    # again and made PROMPT_P5 live (tests/test_p5b.py).
     calls = TRIAL["calls"]
     assert len(calls) == 10 and sum(c["status"] == "ok" for c in calls) == 7
-    assert analyst.SYSTEM_PROMPT is analyst.PROMPT_P4
-    assert analyst.MAX_SENTENCES == 3
     for rule in ("Do not guess what the messages contain", "usually", "ONE thing to check next",
                  "other device"):
         assert rule in analyst.PROMPT_P5
 
 
-def test_every_real_p5_answer_passes_the_check_with_p5_limits(monkeypatch):
+def test_every_real_p5_answer_passed_the_p5_check(monkeypatch):
+    # Checked with the limits and rules of P5 (5 sentences, 900 characters).
+    # P5b added the one-hedge-at-a-time rule; six of these seven early answers say
+    # "may likely" or "usually consistent with", which that rule now rejects -
+    # and nothing else (the reason the prompt was tightened).
     monkeypatch.setattr(analyst, "MAX_SENTENCES", 5)
     monkeypatch.setattr(analyst, "MAX_CHARACTERS", 900)
     answered = [c for c in TRIAL["calls"] if c["summary"]]
     assert len(answered) == 7
+    stacked = 0
     for c in answered:
-        assert analyst.check_summary(c["summary"], TRIAL["facts"][c["session"]], NAMES) == [], c
+        problems = analyst.check_summary(c["summary"], TRIAL["facts"][c["session"]], NAMES)
+        assert all("stacks two hedges" in p for p in problems), (c, problems)
+        stacked += bool(problems)
+    assert stacked == 6
     # the three failures never produced an answer: refused within a second
     failed = [c for c in TRIAL["calls"] if c["status"] != "ok"]
     assert all(c["status"] == "unreachable" and c["seconds"] < 1.0 for c in failed)

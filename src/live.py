@@ -693,6 +693,15 @@ class LiveSession:
             if facts is not None:
                 self.analyst.ask_in_background(facts, stage="alert")
                 self._analyst_asked = True
+        elif self._analyst_asked and not self.analyst.busy():
+            # P5b: the live summary says whether any other device changed. If
+            # another device is flagged later, ask again, so the summary never
+            # disagrees with the cards beside it. (Never happened in the lab.)
+            facts = analyst.analyst_facts(self.incident, self.addresses)
+            last = (self._analyst_record() or {}).get("facts") or {}
+            if facts is not None and last and \
+                    facts.get("other_devices_abnormal") != last.get("other_devices_abnormal"):
+                self.analyst.ask_in_background(facts, stage="spread")
         record = self._analyst_record()
         self.incident = incident.with_analyst(self.incident, record)
         changed = self.analyst.changes != self._analyst_changes
