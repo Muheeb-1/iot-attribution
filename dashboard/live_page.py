@@ -21,8 +21,11 @@ pieces come from dashboard/theme.py.
                              analysis)
   device lanes one bar per device per minute, on one scale, with the line
   right card   "This session" before a verdict, "How it was found" after
-  report area  the timeline and the full incident report (Step 19; restyled
-               in P3), the network and suspects in an expander
+  report area  the designed report (Step P3, docs/design/report_mockup.html):
+               key facts and what happened, the timeline, the ATT&CK
+               techniques, what to do, Create PDF / Download PDF; the full
+               eight sections in a collapsed "Full technical detail"; the
+               network and suspects in an expander
   Lab validation  collapsed, at the bottom: the test-attack command and
                "Compare with the recorded answer"
 
@@ -420,7 +423,7 @@ def containment_text(state: dict) -> str | None:
     c = state.get("containment")
     if not c:
         return None
-    return incident.containment_line(c, state.get("capture_start_epoch"))
+    return incident.containment_line(c, state.get("capture_start_epoch"), state.get("addresses"))
 
 
 # --------------------------------------------------------------------------
@@ -519,15 +522,49 @@ def draw_state(state: dict, live_dir: Path, sound: bool = True) -> None:
     draw_lab_validation(state)
 
 
-def draw_report_area(state: dict, ack=None) -> None:
-    """Timeline, the report (Step 19 content; P3 restyles it), network and suspects."""
-    line = theme.timeline(state, ack)
-    if line:
-        st.html(line)
+def report_for_page(state: dict, ack=None):
+    """
+    The engine's report as the page shows it: with the acknowledgement the
+    page already knows (the engine adds it on its next cycle) - or None when
+    there is no usable report.
+    """
+    r = state.get("incident")
+    if not r or r.get("status") in ("failed", None):
+        return None
+    if ack and not r.get("acknowledged"):
+        r = incident.with_acknowledgement(r, ack)
+    if r.get("containment") and r.get("status") != "no incident":
+        # the playbook's last line, re-worded from the same check (a state
+        # written before P3 still says "NOT YET CONTAINED: ...")
+        r = incident.with_containment(r, r["containment"])
+    return r
 
-    if state.get("incident") and state["incident"].get("status") not in ("failed", None):
-        draw_report(state)
+
+def draw_report_area(state: dict, ack=None) -> None:
+    """
+    The report area, in the report's design (Step P3): key facts and what
+    happened, timeline, techniques and what to do, the PDF; then the full
+    eight sections collapsed; then the network and suspects.
+    """
+    r = report_for_page(state, ack)
+    if r is not None and r.get("status") != "no incident":
+        facts = incident.design_facts(r, state.get("addresses"))
+        st.html(theme.report_summary_card(facts))
+        line = theme.timeline(state, ack)
+        if line:
+            st.html(line)
+        left, right = st.columns([1, 1], gap="medium")
+        with left:
+            st.html(theme.techniques_card(facts))
+        with right:
+            st.html(theme.steps_card(facts))
+        draw_downloads(state, r)
+        with st.expander("Full technical detail (all eight sections)"):
+            draw_report(state, r)
     else:
+        line = theme.timeline(state, ack)
+        if line:
+            st.html(line)
         if (state.get("incident") or {}).get("status") == "failed":
             st.warning("The incident report could not be built (%s); the brief is shown "
                        "instead. The verdict above stands."
@@ -580,32 +617,92 @@ def draw_lab_validation(state: dict) -> None:
                            "only after the analysis has finished.")
 
 
-def draw_report(state: dict) -> None:
+def pdf_cache_key(state: dict, report: dict) -> tuple:
+    """A page-made PDF is reused only while the report it was made from is current."""
+    return (state.get("session"), report.get("status"), report.get("now_seconds"),
+            bool(report.get("acknowledged")), (report.get("analyst") or {}).get("status"))
+
+
+def create_pdf(html_text: str, key: tuple) -> None:
+    """The Create PDF button: print the report now (Edge, ~3 s); remember the bytes."""
+    import tempfile
+    folder = Path(tempfile.mkdtemp(prefix="iot_report_"))
+    source = folder / "report.html"
+    source.write_text(html_text, encoding="utf-8")
+    made = incident.html_to_pdf(source)
+    st.session_state["report-pdf"] = {"key": key,
+                                      "data": made.read_bytes() if made else None}
+
+
+def engine_pdf_bytes(state: dict):
+    """The PDF the engine printed at STOP, if it is there."""
+    if state.get("phase") != live.STOPPED or not state.get("pdf_file"):
+        return None
+    try:
+        return Path(state["pdf_file"]).read_bytes()
+    except OSError:
+        return None
+
+
+def draw_downloads(state: dict, report: dict) -> None:
+    """
+    Download PDF (the engine's, printed at STOP, or one made with Create PDF)
+    and the same report as HTML. If no PDF can be made on this computer, the
+    HTML can be printed to PDF from the browser.
+    """
+    session = report.get("session", "incident")
+    html_text = incident.render_html(report, state.get("addresses"))
+    key = pdf_cache_key(state, report)
+    made = st.session_state.get("report-pdf") or {}
+    pdf = engine_pdf_bytes(state)
+    if pdf is None and made.get("key") == key:
+        pdf = made.get("data")
+    one, two, note = st.columns([1, 1, 3])
+    with one:
+        if pdf:
+            st.download_button("Download PDF", data=pdf, file_name="%s.pdf" % session,
+                               mime="application/pdf", key="report-pdf-download", type="primary")
+        else:
+            st.button("Create PDF", key="report-pdf-create", on_click=create_pdf,
+                      args=(html_text, key),
+                      help="Prints this report to PDF with Microsoft Edge (a few seconds).")
+    with two:
+        st.download_button("Download HTML", data=html_text, file_name="%s.html" % session,
+                           mime="text/html", key="report-download")
+    with note:
+        if made.get("key") == key and made.get("data") is None and not pdf:
+            st.caption("No PDF could be made on this computer (Edge or Chrome is needed). "
+                       "Download the HTML and print it to PDF from the browser.")
+        elif state.get("report_file"):
+            st.caption("Also saved as `%s`%s." % (
+                state["report_file"],
+                " and `%s`" % state["pdf_file"] if state.get("pdf_file") else ""))
+
+
+def draw_report(state: dict, r: dict | None = None) -> None:
     """
     The Step 19 incident report - every section, as the engine wrote it into
-    state.json. Nothing is recomputed here; the download is the same report as
-    the HTML file the engine writes to reports/<session>.html.
+    state.json, inside "Full technical detail". Nothing is recomputed here.
+    Destinations are shown as addresses (192.168.0.200:4444), never as
+    "broker:4444" (incident.display_text - display only).
     """
-    r = state["incident"]
+    r = r or state["incident"]
     start = r.get("capture_start_epoch")
-    st.subheader("Incident report")
-    st.download_button("Download the report (HTML, print to PDF from the browser)",
-                       data=incident.render_html(r),
-                       file_name="%s.html" % r.get("session", "incident"),
-                       mime="text/html", key="report-download")
-    if state.get("report_file"):
-        st.caption("Also saved as `%s`." % state["report_file"])
+    addresses = state.get("addresses")
+    show = lambda text: incident.display_text(text, r, addresses)  # noqa: E731
 
     st.markdown("**1. What happened**")
-    st.markdown("### %s" % r["what_happened"]["sentence"])
+    st.write(show(r["what_happened"]["sentence"]))
     if r.get("wording", {}).get("source") == "llm":
-        st.caption("In other words: %s" % r["wording"]["headline"])
+        st.caption("In other words: %s" % show(r["wording"]["headline"]))
     if r.get("status") == "no incident":
         return
 
     w = r["when"]
     st.markdown("**2. When**")
-    st.write(w["sentence"])
+    st.write(show(w["sentence"]))
+    if r.get("acknowledged"):
+        st.write(incident.acknowledged_line(r["acknowledged"]))
     if w["abnormal_minutes"]:
         st.caption("Abnormal minutes: " + " · ".join(
             "%s (%.1f)" % (m["text"], m["score"]) for m in w["abnormal_minutes"]))
@@ -623,11 +720,12 @@ def draw_report(state: dict) -> None:
 
     st.markdown("**4. How**")
     for line in r["how"]["sentences"]:
-        st.write(line)
+        st.write(show(line))
     pats = r["how"]["patterns"]
     if pats:
         st.dataframe(pd.DataFrame([{
-            "destination": x["label"], "connections": x["count"],
+            "destination": incident.address_label(x["label"], addresses),
+            "connections": x["count"],
             "first": incident.clock_text(x["first_seconds"], start),
             "typical gap": "~%d s" % round(x["typical_gap_seconds"])
             if x["typical_gap_seconds"] is not None else "-",
@@ -649,13 +747,14 @@ def draw_report(state: dict) -> None:
     st.write(imp["sentence"])
     for dev, rows in imp["reach"].items():
         st.caption("`%s` talked to: %s" % (dev, ", ".join(
-            "%s%s ×%d" % (x["label"], " (NEW)" if x["new"] else "", x["count"]) for x in rows)))
+            "%s%s ×%d" % (incident.address_label(x["label"], addresses),
+                          " (NEW)" if x["new"] else "", x["count"]) for x in rows)))
 
     st.markdown("**7. What to do** (recommended - the operator acts; nothing is done "
                 "automatically)")
     for i, step in enumerate(r["playbook"], 1):
         st.markdown("%d. **[%s] %s**  \n%s" % (i, step["urgency"].upper(), step["title"],
-                                                "  \n".join("   - %s" % d for d in step["do"])))
+                                                "  \n".join("   - %s" % show(d) for d in step["do"])))
 
     st.markdown("**8. What we are not sure about**")
     st.info("  \n".join("- %s" % u for u in r["unsure"]))

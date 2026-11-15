@@ -73,7 +73,7 @@ from datetime import datetime
 
 import plotly.graph_objects as go
 
-from src import detect, live
+from src import detect, incident, live
 
 # --------------------------------------------------------------------------
 # Tokens (copied from docs/design/console_mockup.html)
@@ -254,6 +254,32 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
 .iot .tl .hot::before { background: var(--alert); } .iot .tl .good::before { background: var(--ok); }
 .iot .tl .t { font: 600 18px var(--display); font-variant-numeric: tabular-nums; } .iot .tl .w { color: var(--soft); font-size: 13px; }
 
+/* Step P3: the report area, drawn from incident.design_facts like the PDF */
+.iot .rkeys { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); margin-top: 14px;
+              border: 1px solid var(--line); border-radius: 8px; }
+.iot .rkeys > div { padding: 11px 14px; border-left: 1px solid var(--line); min-width: 0; }
+.iot .rkeys > div:first-child { border-left: 0; }
+.iot .rkeys .v { font: 600 21px/1.15 var(--display); font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.iot .rkeys .v.sev-critical, .iot .rkeys .v.sev-high { color: var(--alert); }
+.iot .rkeys .v.sev-medium { color: var(--watch); }
+.iot .rkeys .k { color: var(--muted); font-size: 13px; margin-top: 3px; }
+.iot .summary { font-size: 16px; line-height: 1.55; margin: 14px 0 0; color: var(--text); }
+.iot .source { font-size: 13px; margin-top: 8px; color: var(--muted); }
+.iot .source.ai { color: var(--ok); font-weight: 600; }
+.iot .tech { display: grid; grid-template-columns: auto 1fr; gap: 10px 12px; align-items: baseline; margin-top: 14px; }
+.iot .tech > b { font: 600 13px var(--mono); background: var(--raised); border: 1px solid var(--line);
+                 border-radius: 4px; padding: 1px 7px; color: var(--soft); }
+.iot .tech span { color: var(--soft); } .iot .tech span b { color: var(--text); }
+.iot .steps { list-style: none; padding: 0; margin: 10px 0 0; }
+.iot .steps li { display: grid; grid-template-columns: 16px 52px 1fr; gap: 10px; padding: 9px 0;
+                 border-top: 1px solid var(--line); color: var(--soft); }
+.iot .steps li:first-child { border-top: 0; }
+.iot .steps li b { color: var(--text); }
+.iot .steps .box { width: 13px; height: 13px; border: 1.5px solid var(--muted); border-radius: 3px; margin-top: 4px; }
+.iot .steps .done .box { background: var(--ok); border-color: var(--ok); }
+.iot .steps .when { font-weight: 600; font-size: 13px; color: var(--alert); padding-top: 1px; }
+.iot .steps .when.later { color: var(--watch); }
+
 /* quiet notes under the band */
 .iot.note { border: 1px solid var(--line); border-left: 3px solid var(--muted); background: var(--panel); border-radius: 6px;
             padding: 8px 12px; color: var(--soft); font-size: 14px; }
@@ -401,12 +427,12 @@ def baseline_end_epoch(state: dict):
 
 
 def endpoint_text(label, addresses: dict) -> str:
-    """'broker:4444' -> '192.168.0.200:4444' when the address was recorded."""
-    label = str(label)
-    name, sep, port = label.rpartition(":")
-    if sep and name in (addresses or {}):
-        return "%s:%s" % (addresses[name], port)
-    return label
+    """
+    'broker:4444' -> '192.168.0.200:4444': the address from the packets, else
+    the lab's fixed infrastructure address (incident.address_label, Step P3),
+    so "broker:4444" is never shown.
+    """
+    return incident.address_label(label, addresses)
 
 
 def _contained(state: dict) -> dict:
@@ -933,3 +959,65 @@ def timeline(state: dict, ack: dict | None = None) -> str:
                     % (cls, esc(t), esc(w)) for t, w, cls in points)
     return ('<div class="iot card"><div class="ctitle">Timeline</div>'
             '<div class="tl">%s</div></div>' % items)
+
+
+# --------------------------------------------------------------------------
+# The report area (Step P3) - the designed report's facts, drawn dark
+# --------------------------------------------------------------------------
+#
+# incident.design_facts collects what the report shows from the engine's
+# report dict; the PDF draws it light (incident.render_html), these draw the
+# same facts dark for the console, so the page and the paper never disagree.
+
+def _mono_in(text: str, monos) -> str:
+    out = esc(text)
+    for m in sorted({x for x in monos or [] if x}, key=len, reverse=True):
+        out = out.replace(esc(m), '<span class="mono">%s</span>' % esc(m))
+    return out
+
+
+def report_keys(facts: dict) -> list:
+    """(value, label, css) for the page's key facts: incident, severity, origin, confidence."""
+    origin = facts.get("keys", [("-", "")])[0]
+    return [
+        (facts.get("incident_id") or "-", "incident", ""),
+        ((facts.get("severity") or "-").capitalize(), "severity",
+         "sev-%s" % (facts.get("severity") or "none")),
+        (origin[0], origin[1], ""),
+        ("%s%%" % facts["confidence"] if facts.get("device") and facts.get("confidence")
+         is not None else "Not certain", "confidence", ""),
+    ]
+
+
+def report_summary_card(facts: dict) -> str:
+    """Key facts and 'What happened' with where its wording came from."""
+    keys = "".join('<div><div class="v %s">%s</div><div class="k">%s</div></div>'
+                   % (css, esc(v), esc(k)) for v, k, css in report_keys(facts))
+    return ('<div class="iot card"><div class="ctitle">Incident report</div>'
+            '<div class="hint">Severity rule: %s</div><div class="rkeys">%s</div>'
+            '<p class="summary">%s</p><div class="source%s">%s%s</div></div>'
+            % (esc(facts.get("severity_rule", "")), keys, esc(facts.get("summary", "")),
+               " ai" if facts.get("by_ai") else "", "&#10003; " if facts.get("by_ai") else "",
+               esc(facts.get("source", ""))))
+
+
+def techniques_card(facts: dict) -> str:
+    items = "".join('<b>%s</b><span><b>%s.</b> %s</span>'
+                    % (esc(t["id"]), esc(t["name"]), esc(t["evidence"]))
+                    for t in facts.get("techniques") or [])
+    if not items:
+        items = '<span></span><span>No technique could be matched from the shape of the traffic.</span>'
+    return ('<div class="iot card"><div class="ctitle">Attack techniques seen (MITRE ATT&amp;CK)'
+            '</div><div class="hint">Consistent with these techniques, judged from the '
+            'shape of the traffic only.</div><div class="tech">%s</div></div>' % items)
+
+
+def steps_card(facts: dict) -> str:
+    items = "".join('<li class="%s"><span class="box"></span><span class="when%s">%s</span>'
+                    '<span><b>%s</b> %s</span></li>'
+                    % ("done" if s["done"] else "", " later" if s["later"] else "", esc(s["when"]),
+                       esc(s["title"]), _mono_in(s["text"], s.get("mono")))
+                    for s in facts.get("steps") or [])
+    return ('<div class="iot card"><div class="ctitle">What to do</div><div class="hint">'
+            'Recommended - the operator acts; nothing is done automatically.</div>'
+            '<ul class="steps">%s</ul></div>' % items)

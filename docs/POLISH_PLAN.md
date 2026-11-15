@@ -183,6 +183,37 @@ P2 as built (15 Nov 2026):
   id format); render contains no unescaped data; `html_to_pdf` returns None cleanly when
   no browser is found.
 
+P3 as built (15 Nov 2026):
+- The Edge command was tried first on `reports\live_session_07.html`: it worked
+  on this laptop (Edge in `C:\Program Files (x86)`, about 3 s, 2 A4 pages with the
+  colours). No fallback was needed. `incident.html_to_pdf` returns None on any
+  failure; the page then says to download the HTML and print it from the browser.
+- Destinations are SHOWN as addresses everywhere on the live page and in the
+  report (`192.168.0.200:4444`, never `broker:4444`): `incident.address_label` /
+  `display_text`, display only. capture.py's names and the report's `label`
+  fields are unchanged, so the containment check and every comparison still
+  match on them. The address comes from the packets, else `capture.IP_TO_NAME`.
+- The containment line is sentence case: "Not contained yet. Last connection to
+  192.168.0.200:4444 at 19:33:19, 39 s ago. Containment is confirmed after 90 s
+  with none." / "Contained at ...".
+- ATT&CK names checked on attack.mitre.org (15 Nov): T1571 Non-Standard Port
+  (Command and Control), T1029 Scheduled Transfer (Exfiltration), T1041
+  Exfiltration Over C2 Channel (Exfiltration).
+- Report gains (new fields only): `incident_id`, `severity`, `severity_rule`,
+  `techniques`, `addresses`, `evidence`, `session_folder`, `why.series` (every
+  scored minute, for the bars) and `gap_cv` per section-4 pattern (for T1029).
+  A state saved before P3 is still drawn the new way (`designed_fields` works
+  from the dict; without `gap_cv` it does not claim T1029).
+- Live page report area: key facts (incident, severity, origin, confidence -
+  the three response times are already in the band just above), what happened
+  with its wording source, timeline, techniques, what to do, Create PDF /
+  Download PDF + Download HTML, then "Full technical detail (all eight
+  sections)" collapsed. The engine prints `reports/<session>.pdf` at STOP
+  (`live.WRITE_PDF`; switched off for the tests in `tests/conftest.py`).
+- A baseline minute over the line is drawn grey in the report's bars (learning,
+  not an alert), as on the live lanes.
+- Tests: `tests/test_p3.py`.
+
 ### P4 - the AI analyst (cloud)
 - Why cloud: the local model took 45+ minutes per answer on this laptop. Internet is
   assumed for the demo; the page must still be complete without it.

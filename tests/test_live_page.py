@@ -323,10 +323,11 @@ def test_the_incident_page_shows_the_verdict_network_suspects_and_brief(tmp_path
     assert "How it was found" in shown and "Every device, minute by minute" in shown
     assert "Attack origin" in shown
     assert "Suspects" in [s.value for s in at.subheader]
-    # Step 19: the complete incident report replaces the short brief.
-    assert "Incident report" in [s.value for s in at.subheader]
+    # Step 19: the complete incident report replaces the short brief
+    # (Step P3: drawn as the report's design, a card titled "Incident report").
+    assert "Incident report" in shown
     assert "nothing is done automatically" in shown
-    assert "spread" not in shown
+    assert "spread to" not in shown and "appears to have spread" not in shown
 
 
 def test_a_state_without_the_report_still_shows_the_brief(tmp_path):

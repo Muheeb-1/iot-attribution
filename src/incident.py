@@ -58,6 +58,17 @@ USAGE
     python -m src.incident live_batch_05 --no-html
     python -m src.incident rehearsal_02 --pcap pcap/live/rehearsal_02.pcapng   # + IP addresses, SHA-256
     python -m src.incident rehearsal_02 --llm local       # add a validated model wording, if any
+    python -m src.incident live_session_07 --pdf          # + reports/live_session_07.pdf (Edge)
+
+THE DESIGNED REPORT (Step P3)
+-----------------------------
+render_html draws docs/design/report_mockup.html: one light A4 page, two
+pages at most, on screen and as the PDF (html_to_pdf prints it with the Edge
+Windows 11 already has). It adds three rule-based fields - incident_id,
+severity (rule in SEVERITY_RULE) and the MITRE ATT&CK techniques the
+measured behaviour is consistent with - and shows every destination as an
+address (192.168.0.200:4444), never as capture.py's name ("broker:4444").
+The eight sections above are unchanged in the dict and in render_text.
 """
 
 from __future__ import annotations
@@ -66,7 +77,12 @@ import argparse
 import hashlib
 import html
 import json
+import os
+import re
+import shutil
+import subprocess
 import sys
+import tempfile
 from datetime import datetime
 from pathlib import Path
 
@@ -197,7 +213,12 @@ def new_patterns(connections: pd.DataFrame, device: str, baseline_seconds: float
             continue
         group = group.sort_values("t")
         times = group["t"].to_numpy(dtype=float)
-        gap = float(np.median(np.diff(times))) if len(times) > 1 else None
+        gaps = np.diff(times)
+        gap = float(np.median(gaps)) if len(times) > 1 else None
+        # How regular the gaps are: spread / mean (0 = a metronome). Used
+        # only for the ATT&CK "Scheduled Transfer" line (Step P3).
+        gap_cv = (float(np.std(gaps) / np.mean(gaps))
+                  if len(gaps) > 0 and float(np.mean(gaps)) > 0 else None)
         found.append({
             "dst": dst,
             "dport": int(dport),
@@ -208,6 +229,7 @@ def new_patterns(connections: pd.DataFrame, device: str, baseline_seconds: float
             "first_id": str(group["conn_id"].iloc[0]),
             "last_seconds": float(times[-1]),
             "typical_gap_seconds": gap,
+            "gap_cv": gap_cv,
             "typical_bytes_out": int(round(float(group["bytes_out"].median()))),
             "typical_bytes_in": int(round(float(group["bytes_in"].median()))),
             "conn_ids": [str(c) for c in group["conn_id"].head(5)],
@@ -299,23 +321,87 @@ def containment_status(connections: pd.DataFrame, device, patterns: list,
     return status
 
 
-def containment_line(c: dict, start_epoch=None) -> str:
+def containment_line(c: dict, start_epoch=None, addresses=None) -> str:
+    """
+    The CONTAINED check in one sentence, in sentence case (Step P3). The
+    destinations are written as addresses ("192.168.0.200:4444", not
+    "broker:4444") - see address_label; the check itself is unchanged.
+    """
     if not c or not c.get("available"):
         return ("The containment check needs the new connections of section 4; "
                 "none have been identified yet.")
-    watching = ", ".join(c["watching"])
+    watching = ", ".join(address_label(w, addresses) for w in c["watching"])
     needed = int(c["quiet_needed_seconds"])
     if c.get("contained"):
-        return ("CONTAINED at %s: %s has made no connection to %s since %s (%s)."
+        return ("Contained at %s: %s has made no connection to %s since %s (%s)."
                 % (clock_text(c["contained_seconds"], start_epoch), c["device"], watching,
                    clock_text(c["last_seen_seconds"], start_epoch),
                    c.get("last_seen_id") or "-"))
     if c.get("last_seen_seconds") is None:
         return "Watching %s for connections to %s." % (c["device"], watching)
-    return ("NOT YET CONTAINED: the last connection from %s to %s was at %s, %s ago. "
-            "Contained is confirmed after %d s with none."
-            % (c["device"], watching, clock_text(c["last_seen_seconds"], start_epoch),
+    return ("Not contained yet. Last connection to %s at %s, %s ago. "
+            "Containment is confirmed after %d s with none."
+            % (watching, clock_text(c["last_seen_seconds"], start_epoch),
                duration_text(c["quiet_seconds"]), needed))
+
+
+# --------------------------------------------------------------------------
+# Addresses for display (Step P3)
+# --------------------------------------------------------------------------
+#
+# capture.py names the master laptop "broker" (it runs the MQTT broker), and
+# the report's labels say "broker:4444". On screen and on paper the operator
+# needs the address they would actually block or look up, so every label is
+# DISPLAYED as "192.168.0.200:4444". This is display only: capture.py's
+# names, the report's "label" fields and everything that matches on them are
+# unchanged. The address comes from the packets (addresses_from_packets) and,
+# failing that, from capture.IP_TO_NAME - the fixed addresses of the lab's
+# infrastructure - so "broker" is never shown even without the packets.
+
+def address_of(name, addresses=None):
+    """The IP address to show for a name, or None."""
+    if not name:
+        return None
+    found = (addresses or {}).get(name)
+    if found:
+        return found
+    for ip, known in capture.IP_TO_NAME.items():
+        if known == name:
+            return ip
+    return None
+
+
+def address_label(label, addresses=None) -> str:
+    """'broker:4444' -> '192.168.0.200:4444'; 'broker (no port)' likewise; else unchanged."""
+    label = str(label)
+    for suffix_start in (label.rfind(":"), label.rfind(" (no port)")):
+        if suffix_start > 0:
+            name, suffix = label[:suffix_start], label[suffix_start:]
+            if suffix == " (no port)" or suffix[1:].isdigit():
+                ip = address_of(name, addresses)
+                return ip + suffix if ip else label
+    return label
+
+
+def display_text(text, report: dict | None = None, addresses=None) -> str:
+    """
+    A report sentence with every destination label it mentions written as an
+    address. Only the labels the report itself lists (section 4, section 6,
+    the CONTAINED check) are replaced, so nothing else in a sentence changes.
+    """
+    text = str(text)
+    addresses = dict((report or {}).get("addresses") or {}, **(addresses or {}))
+    labels = set()
+    for p in ((report or {}).get("how") or {}).get("patterns") or []:
+        labels.add(p.get("label", ""))
+    for rows in (((report or {}).get("impact") or {}).get("reach") or {}).values():
+        labels.update(r.get("label", "") for r in rows)
+    labels.update(((report or {}).get("containment") or {}).get("watching") or [])
+    for label in sorted((l for l in labels if l), key=len, reverse=True):
+        shown = address_label(label, addresses)
+        if shown != label:
+            text = re.sub(r"(?<![\w.-])%s(?!\d)" % re.escape(label), shown, text)
+    return text
 
 
 # --------------------------------------------------------------------------
@@ -557,7 +643,116 @@ def build_incident(run: runs.Run, detection: detect.Detection,
     # ---- 8. what we are not sure about ---------------------------------------
     report["unsure"] = _unsure(result, label, label_why, spread, not_judged, unseen,
                                detection, report["containment"])
+
+    # ---- Step P3: new fields for the designed report (nothing above changes) --
+    # Every scored minute of the focus device, baseline included, for the
+    # report's small bar chart (section 5 lists only the minutes from the onset).
+    report["why"]["series"] = [{"window": int(w), "score": round(float(s), 2),
+                                "baseline": bool(w < run.baseline_windows),
+                                "over": bool(s > detection.threshold)}
+                               for w, s in sorted(scores.items())]
+    report["addresses"] = {k: str(v) for k, v in (addresses or {}).items()}
+    report["evidence"] = {k: evidence[k] for k in ("folder", "files", "sha256", "file")
+                          if k in (evidence or {})}
+    report["session_folder"] = session_folder
+    report.update(designed_fields(report))
     return report
+
+
+# --------------------------------------------------------------------------
+# Step P3: incident id, severity and ATT&CK techniques - rules, not a model
+# --------------------------------------------------------------------------
+
+SEVERITY_RULE = ("Critical: more than one device flagged. High: one device with a new "
+                 "repeating destination. Medium: one device flagged, no new repeating "
+                 "destination.")
+
+# The ports this lab has a name for (PORT_WORDS) are the "known services"; a
+# new destination on any other port is a non-standard port.
+KNOWN_SERVICE_PORTS = frozenset(PORT_WORDS)
+
+# Names checked on attack.mitre.org on 15 Nov 2026.
+TECHNIQUES = {
+    "T1571": {"name": "Non-Standard Port", "tactic": "Command and Control",
+              "url": "https://attack.mitre.org/techniques/T1571/"},
+    "T1029": {"name": "Scheduled Transfer", "tactic": "Exfiltration",
+              "url": "https://attack.mitre.org/techniques/T1029/"},
+    "T1041": {"name": "Exfiltration Over C2 Channel", "tactic": "Exfiltration",
+              "url": "https://attack.mitre.org/techniques/T1041/"},
+}
+SCHEDULED_MIN_COUNT = 4         # connections needed before a rhythm is claimed
+SCHEDULED_MAX_CV = 0.2          # spread of the gaps / their mean
+
+
+def incident_id(report: dict) -> str:
+    """
+    INC-<capture date YYYYMMDD>-<trailing digits of the session name>, or the
+    alert's HHMM when the name has no digits. live_session_07 on 13 Nov 2026 ->
+    INC-20261113-07. A run with no clock time (simulated) has no date: INC-<HHMM>.
+    """
+    session = str(report.get("session") or "")
+    start = report.get("capture_start_epoch")
+    digits = re.search(r"(\d+)$", session)
+    if digits:
+        tail = digits.group(1)
+    else:
+        alert = (report.get("when") or {}).get("alert_epoch")
+        if alert is not None:
+            tail = datetime.fromtimestamp(float(alert)).strftime("%H%M")
+        else:
+            seconds = int((report.get("when") or {}).get("alert_seconds") or 0)
+            tail = "%02d%02d" % (seconds // 3600, (seconds % 3600) // 60)
+    if start is None:
+        return "INC-%s" % tail
+    return "INC-%s-%s" % (datetime.fromtimestamp(float(start)).strftime("%Y%m%d"), tail)
+
+
+def severity_of(report: dict) -> str:
+    """critical / high / medium, by SEVERITY_RULE, from the report's own facts."""
+    if len(report.get("flagged") or []) > 1:
+        return "critical"
+    if (report.get("how") or {}).get("patterns"):
+        return "high"
+    return "medium"
+
+
+def techniques_for(report: dict, addresses=None) -> list:
+    """
+    The MITRE ATT&CK techniques the measured behaviour is CONSISTENT WITH,
+    each with the measurement that supports it. Only section 4's new
+    repeating destinations are looked at; no packet contents are needed.
+      T1571  a new destination on a port outside the known-service list
+      T1029  4+ connections at a regular gap (spread / mean < 0.2)
+      T1041  more bytes out than back on that destination
+    """
+    found = {}
+    addresses = dict(report.get("addresses") or {}, **(addresses or {}))
+    for p in (report.get("how") or {}).get("patterns") or []:
+        where = address_label(p.get("label", ""), addresses)
+        if "T1571" not in found and int(p.get("dport") or 0) not in KNOWN_SERVICE_PORTS:
+            found["T1571"] = "Port %d was never used in the baseline and is not a known service " \
+                             "here (%s)." % (int(p["dport"]), where)
+        gap, cv = p.get("typical_gap_seconds"), p.get("gap_cv")
+        if "T1029" not in found and int(p.get("count") or 0) >= SCHEDULED_MIN_COUNT \
+                and gap is not None and cv is not None and cv < SCHEDULED_MAX_CV:
+            found["T1029"] = "One connection every %d seconds to %s, machine-regular " \
+                             "(%d connections)." % (round(gap), where, int(p["count"]))
+        out, back = p.get("typical_bytes_out"), p.get("typical_bytes_in")
+        if "T1041" not in found and out is not None and back is not None and out > back:
+            found["T1041"] = "%d bytes out for %d back, each time, to %s." % (out, back, where)
+    return [dict(TECHNIQUES[t], id=t, evidence=found[t]) for t in ("T1571", "T1029", "T1041")
+            if t in found]
+
+
+def designed_fields(report: dict) -> dict:
+    """
+    The P3 fields, worked out from the report dict alone - so a report saved
+    before P3 (an old state.json) can be drawn the new way too.
+    """
+    if not report or report.get("status") in (None, "failed", "no incident"):
+        return {}
+    return {"incident_id": incident_id(report), "severity": severity_of(report),
+            "severity_rule": SEVERITY_RULE, "techniques": techniques_for(report)}
 
 
 def _run_length(scores: dict, onset_w, threshold) -> int:
@@ -628,7 +823,7 @@ def _playbook(run, named, result, patterns, addresses, evidence, session_folder,
                          "made no connection to %s for %d s."
                          % (named or "the device", ports or "the new destinations",
                             int(CONTAINED_QUIET_SECONDS)),
-                         containment_line(containment, start)]})
+                         containment_line(containment, start, addresses)]})
     return steps
 
 
@@ -732,7 +927,8 @@ def with_containment(report: dict, containment: dict) -> dict:
     playbook = []
     for step in report.get("playbook", []):
         if step.get("step") == "verify":
-            step = dict(step, do=list(step["do"][:-1]) + [containment_line(containment, start)])
+            step = dict(step, do=list(step["do"][:-1])
+                        + [containment_line(containment, start, report.get("addresses"))])
         playbook.append(step)
     report["playbook"] = playbook
     return report
@@ -808,100 +1004,412 @@ def render_text(report: dict) -> str:
     return "\n".join(out)
 
 
+# --------------------------------------------------------------------------
+# The designed report (Step P3): docs/design/report_mockup.html
+# --------------------------------------------------------------------------
+#
+# One light A4 page design, used on screen and printed to PDF, two pages at
+# most. It shows the SHORT version - key facts, what happened, timeline, how
+# it was found, why we believe it, techniques, what to do, evidence and
+# limits. The eight sections stay in the report dict and in render_text; the
+# dashboards show them under "Full technical detail".
+#
+# design_facts() collects what is shown, as plain data, from the report dict
+# alone; render_html() draws it light for paper and dashboard/theme.py draws
+# the same facts dark for the live page, so the two never disagree.
+
+def _when_epoch(report: dict, seconds):
+    return _epoch(seconds, report.get("capture_start_epoch"))
+
+
+def _hms(epoch) -> str:
+    return "-" if epoch is None else datetime.fromtimestamp(float(epoch)).strftime("%H:%M:%S")
+
+
+def template_summary(report: dict, addresses=None) -> str:
+    """
+    'What happened' in two to four plain sentences, built from the measurements
+    (the template wording; Step P4's AI analyst may word it instead). Names only
+    facts that do not change minute to minute.
+    """
+    addresses = dict(report.get("addresses") or {}, **(addresses or {}))
+    where = report.get("where") or {}
+    named = where.get("named")
+    flagged = report.get("flagged") or []
+    if not named:
+        return display_text(report.get("what_happened", {}).get("sentence", ""), report, addresses)
+    patterns = (report.get("how") or {}).get("patterns") or []
+    first = _hms((report.get("when") or {}).get("first_unusual_epoch")) \
+        if report.get("capture_start_epoch") is not None \
+        else clock_text((report.get("when") or {}).get("first_unusual_seconds"))
+    parts = []
+    if patterns:
+        p = patterns[0]
+        gap = p.get("typical_gap_seconds")
+        parts.append("%s was compromised at %s." % (named, first))
+        parts.append("It began opening a connection to %s%s, sending %d bytes each time."
+                     % (address_label(p["label"], addresses),
+                        " every %d seconds" % round(gap) if gap is not None else " repeatedly",
+                        p["typical_bytes_out"]))
+        parts.append("It never used that destination while its normal behaviour was "
+                     "being learned.")
+    else:
+        parts.append("%s started behaving differently from its normal pattern at %s." % (named, first))
+    others = [d for d in flagged if d != named]
+    if others:
+        parts.append("%s also behaved abnormally afterwards, so the attack appears to have "
+                     "spread." % ", ".join(others))
+    else:
+        parts.append("No other device changed its behaviour, so the attack started here and "
+                     "did not spread.")
+    return " ".join(parts)
+
+
+def summary_and_source(report: dict, addresses=None) -> tuple:
+    """
+    (summary text, source line, written_by_ai). The AI analyst's summary is
+    used only if it is in the report AND passed the validator (Step P4);
+    otherwise the template wording, and the source line says which.
+    """
+    analyst = report.get("analyst") or {}
+    if analyst.get("status") == "ok" and analyst.get("summary"):
+        return (analyst["summary"],
+                "Written by the AI analyst (%s). Every fact checked against the evidence."
+                % analyst.get("model", "cloud model"), True)
+    if analyst.get("status") in ("failed", "rejected", "unreachable", "no key"):
+        source = "Template wording - the AI analyst was not reachable."
+    elif analyst.get("status") == "asking":
+        source = "Template wording - the AI analyst is being asked."
+    else:
+        source = "Template wording, built from the measurements."
+    return template_summary(report, addresses), source, False
+
+
+def design_facts(report: dict, addresses=None) -> dict:
+    """Everything the designed report shows, as plain data (tested directly)."""
+    addresses = dict(report.get("addresses") or {}, **(addresses or {}))
+    report = dict(report, **{k: v for k, v in designed_fields(report).items()
+                              if k not in report})
+    start = report.get("capture_start_epoch")
+    status = report.get("status", "no incident")
+    session = str(report.get("session") or "")
+    facts = {"session": session, "status": status, "incident_id": report.get("incident_id"),
+             "date": (datetime.fromtimestamp(float(start)).strftime("%d %b %Y").lstrip("0")
+                      if start is not None else None)}
+    if status in ("no incident", "failed", None):
+        facts["headline"] = "No incident"
+        facts["summary"] = report.get("what_happened", {}).get("sentence", "")
+        return facts
+
+    where = report.get("where") or {}
+    when = report.get("when") or {}
+    named = where.get("named")
+    c = report.get("containment") or {}
+    ack = report.get("acknowledged") or {}
+    contained = bool(c.get("contained"))
+    alert_epoch = when.get("alert_epoch")
+    hms = (lambda epoch, seconds: _hms(epoch)) if start is not None else \
+        (lambda epoch, seconds: clock_text(seconds))
+
+    facts["headline"] = ("Attack started on" if named else "Attack detected, origin not certain")
+    facts["device"] = named
+    facts["severity"] = report.get("severity")
+    facts["severity_rule"] = report.get("severity_rule", SEVERITY_RULE)
+    facts["contained"] = contained
+    facts["confidence"] = where.get("confidence_percent")
+    facts["tags"] = ([("sev", "Severity %s" % report.get("severity"))]
+                     + [("ok", "Contained") if contained else ("sev", "Not contained yet")]
+                     + ([("plain", "Confidence %s%%" % where.get("confidence_percent"))]
+                        if named else [("plain", "Too close to call")]))
+
+    to_contain = None
+    if contained and c.get("contained_epoch") is not None and alert_epoch is not None:
+        to_contain = max(0.0, float(c["contained_epoch"]) - float(alert_epoch))
+    elif contained and c.get("contained_seconds") is not None and when.get("alert_seconds") is not None:
+        to_contain = max(0.0, float(c["contained_seconds"]) - float(when["alert_seconds"]))
+    origin_ip = address_of(named, addresses) if named else None
+    facts["keys"] = [
+        (named or ", ".join(where.get("shortlist") or []) or "-",
+         "origin device" + (", %s" % origin_ip if origin_ip else "") if named else "suspects"),
+        (duration_text(when.get("time_to_detect_seconds")) if when.get("time_to_detect_seconds")
+         is not None else "--", "to detect"),
+        (duration_text(ack.get("after_alert_seconds")) if ack else "--", "to acknowledge"),
+        (duration_text(to_contain) if to_contain is not None else "--", "to contain"),
+    ]
+    facts["summary"], facts["source"], facts["by_ai"] = summary_and_source(report, addresses)
+
+    # Timeline: the same five moments as the live page's timeline.
+    baseline = report.get("baseline_seconds")
+    tl = []
+    if baseline is not None:
+        tl.append((hms(_when_epoch(report, float(baseline) + GRACE_SECONDS),
+                       float(baseline) + GRACE_SECONDS), "Baseline established", ""))
+    if when.get("first_unusual_seconds") is not None:
+        tl.append((hms(when.get("first_unusual_epoch"), when["first_unusual_seconds"]),
+                   "First unusual connection", "hot"))
+    if when.get("alert_seconds") is not None:
+        tl.append((hms(alert_epoch, when["alert_seconds"]), "Alert raised", "hot"))
+    if ack:
+        tl.append((_hms(ack.get("acknowledged_epoch")), "Acknowledged by operator", ""))
+    if contained:
+        tl.append((hms(c.get("contained_epoch"), c.get("contained_seconds")),
+                   "Contained, %d s of silence" % int(c.get("quiet_needed_seconds") or 90), "good"))
+    facts["timeline"] = tl
+
+    patterns = (report.get("how") or {}).get("patterns") or []
+    facts["found"] = [{"destination": address_label(p["label"], addresses),
+                       "count": p["count"],
+                       "gap": ("~%d s" % round(p["typical_gap_seconds"])
+                               if p.get("typical_gap_seconds") is not None else "-"),
+                       "bytes_out": p["typical_bytes_out"], "bytes_in": p["typical_bytes_in"]}
+                      for p in patterns[:3]]
+    why = report.get("why") or {}
+    baseline_minutes = int(round(float(baseline or 0) / 60))
+    facts["found_note"] = ("Never used in the %d-minute baseline. " % baseline_minutes
+                           if patterns else
+                           "No new repeating destination: flagged on how its traffic changed. ")
+    facts["evidence_ids"] = list(why.get("evidence_ids") or [])[:3]
+
+    threshold = float(why.get("threshold") or report.get("threshold") or 4.0)
+    series = why.get("series")
+    if not series:      # a report from before P3: only the minutes from the onset
+        series = [{"window": m.get("window"), "score": m["score"], "baseline": False,
+                   "over": m["over"]} for m in why.get("minutes") or []]
+    facts["bars"] = [{"height": max(0.0, min(1.0, float(s["score"]) / BAR_SCALE)),
+                      # a baseline minute is learning, never an alert: drawn grey
+                      "score": float(s["score"]),
+                      "over": bool(s.get("over")) and not bool(s.get("baseline")),
+                      "baseline": bool(s.get("baseline")), "capped": float(s["score"]) > BAR_SCALE}
+                     for s in series[-MAX_BARS:]]
+    facts["threshold"] = threshold
+    facts["line_height"] = threshold / BAR_SCALE
+    run = [m for m in why.get("minutes") or []]
+    over_run = []
+    for m in run:
+        if not m.get("over"):
+            break
+        over_run.append(m)
+    moved = (why.get("moved") or [])[:1]
+    caption = "%d minutes in a row over the alert line (%.1f)" % (len(over_run), threshold)
+    if over_run:
+        caption += ": scores %s." % ", ".join("%.1f" % m["score"] for m in over_run)
+    else:
+        caption += "."
+    if moved:
+        words = re.sub(r"\s*\(.*\)$", "", moved[0]["words"])
+        caption += " %s went from %s to %s." % (words[0].upper() + words[1:],
+                                                _num(moved[0]["normal"]), _num(moved[0]["during"]))
+    facts["why_caption"] = caption
+
+    facts["techniques"] = report.get("techniques") or techniques_for(report, addresses)
+
+    # What to do, short - from the playbook's facts.
+    targets = [named] if named else list(where.get("shortlist") or [])
+    macs = [(t, _mac_of(t)) for t in targets]
+    isolate = "Isolate %s." % " and ".join(targets)
+    block = "Pull its power, or block MAC %s on the router." % " / ".join(
+        m for _, m in macs if m) if any(m for _, m in macs) else \
+        "Pull its power, or block it on the router."
+    done = (" Done: confirmed contained at %s." % hms(c.get("contained_epoch"),
+                                                       c.get("contained_seconds"))
+            if contained else "")
+    evidence = report.get("evidence") or {}
+    folder = evidence.get("folder") or report.get("session_folder")
+    keep = "Keep the capture as evidence."
+    keep_detail = ""
+    if folder:
+        files = evidence.get("files")
+        keep_detail = ("%d files in %s." % (files, folder) if files else "The capture is in %s." % folder)
+    facts["steps"] = [
+        {"when": "Now", "later": False, "done": contained, "title": isolate,
+         "text": block + done, "mono": [m for _, m in macs if m]},
+        {"when": "Now", "later": False, "done": False, "title": keep, "text": keep_detail,
+         "mono": [folder] if folder else []},
+        {"when": "Today", "later": True, "done": False,
+         "title": "Re-flash the board" if len(targets) == 1 else "Re-flash the boards",
+         "text": "from known-good firmware and change the Wi-Fi and broker credentials it held.",
+         "mono": []},
+        {"when": "Today", "later": True, "done": False,
+         "title": "Reconnect it only after a clean baseline", "text": "shows it as normal.",
+         "mono": []},
+    ]
+    facts["sha256"] = evidence.get("sha256")
+    limits = ["The capture point sees traffic to and from the master laptop, plus broadcasts. "
+              "Board-to-board traffic is not visible.",
+              "The alert needs %d abnormal minutes in a row, so it comes 3 to 4 minutes after "
+              "an attack starts." % int(report.get("consecutive") or 3)]
+    if where.get("not_judged"):
+        limits.append("Not judged (too little traffic during the baseline): %s."
+                      % ", ".join(where["not_judged"]))
+    limits.append("This report states what was measured. The method can be wrong; check the "
+                  "evidence connections before acting on anything irreversible.")
+    facts["limits"] = limits
+    facts["footer"] = ("Verdict and numbers: detection and attribution engine (V5). Wording: %s."
+                       % ("AI analyst, validated" if facts["by_ai"] else "template, from the measurements"))
+    return facts
+
+
+BAR_SCALE = 10.0        # the same scale as the live page's lanes: the line (4.0) at 40%
+MAX_BARS = 40
+
+
+def _num(value) -> str:
+    value = float(value)
+    return "%d" % value if value == int(value) else "%.1f" % value
+
+
 _CSS = """
-body{font-family:Segoe UI,Arial,sans-serif;max-width:900px;margin:24px auto;color:#222;line-height:1.45}
-h1{font-size:22px;margin-bottom:4px} h2{font-size:17px;margin:22px 0 6px;border-bottom:1px solid #ddd}
-.status{display:inline-block;padding:4px 10px;border-radius:4px;font-weight:bold;color:#fff}
-.incident{background:#c0392b}.contained{background:#27ae60}.none{background:#7f8c8d}
-table{border-collapse:collapse;margin:6px 0} td,th{border:1px solid #ccc;padding:3px 8px;font-size:14px}
-th{background:#f4f4f4;text-align:left} .muted{color:#777;font-size:13px} code{background:#f4f4f4;padding:0 3px}
-.over{color:#c0392b;font-weight:bold} li{margin:2px 0}
-@media print{body{margin:0}}
+@page { size: A4; margin: 14mm 14mm 16mm; }
+:root { --ink: #101A2E; --soft: #44536F; --muted: #6D7B95; --rule: #D5DCE8; --wash: #F2F5FA;
+        --navy: #0E1524; --alert: #C9283B; --ok: #0F7D62; --amber: #8A5A00;
+        --display: "Bahnschrift", "DIN Alternate", "Barlow Semi Condensed", "Segoe UI", sans-serif;
+        --body: "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif;
+        --mono: "Cascadia Mono", Consolas, monospace; }
+* { box-sizing: border-box; -webkit-print-color-adjust: exact; print-color-adjust: exact; }
+body { margin: 0 auto; max-width: 182mm; color: var(--ink); font: 10.5pt/1.5 var(--body); background: #fff; }
+@media screen { body { padding: 28px 12px 60px; } }
+h1, h2, p, ul { margin: 0; }
+.mono { font-family: var(--mono); font-size: 0.93em; }
+.head { background: var(--navy); color: #fff; border-radius: 8px; padding: 18px 22px; display: grid; grid-template-columns: 1fr auto; gap: 16px; align-items: end; }
+.head .org { font: 500 9.5pt var(--body); color: #B4C2DB; }
+.head h1 { font: 600 22pt/1.1 var(--display); margin-top: 3px; }
+.head h1 .dev { font-family: var(--mono); font-size: 0.86em; white-space: nowrap; }
+.head .id { text-align: right; font: 600 12pt var(--mono); }
+.head .id small { display: block; font: 400 9pt var(--body); color: #B4C2DB; }
+.tags { display: flex; gap: 8px; margin-top: 12px; flex-wrap: wrap; }
+.tag { font: 600 9pt var(--body); padding: 3px 10px; border-radius: 999px; }
+.tag.sev { background: #FF5D6C; color: #2A0A10; }  .tag.ok { background: #35C7A0; color: #06261E; }
+.tag.plain { background: #1E2B44; color: #E8EEF9; }
+.keys { display: grid; grid-template-columns: repeat(4, 1fr); margin: 14px 0 4px; border: 1px solid var(--rule); border-radius: 8px; }
+.keys > div { padding: 11px 14px; border-left: 1px solid var(--rule); }  .keys > div:first-child { border-left: 0; }
+.keys .v { white-space: nowrap; font: 600 15pt/1.1 var(--display); font-variant-numeric: tabular-nums; }
+.keys .k { color: var(--muted); font-size: 8.5pt; margin-top: 3px; }
+h2 { font: 600 12.5pt var(--display); margin: 18px 0 7px; padding-bottom: 4px; border-bottom: 2px solid var(--ink); }
+section { break-inside: avoid; }
+.summary { font-size: 11.5pt; line-height: 1.55; }
+.source { color: var(--ok); font-size: 8.5pt; margin-top: 6px; font-weight: 600; }
+.source.tpl { color: var(--muted); }
+.tl { display: grid; grid-auto-columns: 1fr; grid-auto-flow: column; margin-top: 4px; }
+.tl div { border-top: 2px solid var(--rule); padding: 9px 8px 0 0; position: relative; }
+.tl div::before { content: ""; position: absolute; top: -6px; left: 0; width: 10px; height: 10px; border-radius: 50%; background: var(--muted); }
+.tl .hot::before { background: var(--alert); }  .tl .good::before { background: var(--ok); }
+.tl b { display: block; font: 600 12pt var(--display); font-variant-numeric: tabular-nums; }
+.tl span { color: var(--soft); font-size: 8.5pt; }
+table { border-collapse: collapse; width: 100%; font-size: 9.5pt; }
+th { text-align: left; color: var(--muted); font-weight: 600; font-size: 8.5pt; padding: 5px 10px 5px 0; border-bottom: 1px solid var(--rule); }
+td { padding: 6px 10px 6px 0; border-bottom: 1px solid var(--rule); vertical-align: top; }
+td.n { font-variant-numeric: tabular-nums; white-space: nowrap; }
+.two { display: grid; grid-template-columns: 1.15fr 1fr; gap: 20px; }
+.bars { display: flex; align-items: flex-end; gap: 3px; height: 44px; position: relative; margin-top: 4px; }
+.bars i { flex: 1; background: #B9C4D8; border-radius: 2px 2px 0 0; min-height: 2px; }
+.bars i.over { background: var(--alert); }  .bars i.base { background: #DDE3EE; }
+.bars i.capped { box-shadow: inset 0 2px 0 var(--ink); }
+.bars .line { position: absolute; left: 0; right: 0; border-top: 1px dashed var(--soft); }
+.cap { color: var(--muted); font-size: 8.5pt; margin-top: 4px; }
+.tech { display: grid; grid-template-columns: auto 1fr; gap: 5px 12px; align-items: baseline; }
+.tech > b { font: 600 9.5pt var(--mono); background: var(--wash); border: 1px solid var(--rule); border-radius: 4px; padding: 1px 7px; }
+.steps { list-style: none; padding: 0; }
+.steps li { display: grid; grid-template-columns: 16px 62px 1fr; gap: 9px; padding: 6px 0; border-bottom: 1px solid var(--rule); }
+.steps .box { width: 13px; height: 13px; border: 1.5px solid var(--soft); border-radius: 3px; margin-top: 3px; }
+.steps .done .box { background: var(--ok); border-color: var(--ok); }
+.steps .when { font-weight: 600; font-size: 8.5pt; color: var(--alert); padding-top: 2px; }
+.steps .when.later { color: var(--amber); }
+.note { background: var(--wash); border-radius: 6px; padding: 9px 12px; font-size: 9.5pt; color: var(--soft); }
+.note li { margin-left: 16px; }
+.muted { color: var(--muted); }
+.foot { margin-top: 16px; color: var(--muted); font-size: 8pt; display: flex; justify-content: space-between; gap: 12px; border-top: 1px solid var(--rule); padding-top: 6px; }
 """
 
 
-def render_html(report: dict) -> str:
-    """One self-contained page (inline CSS, no scripts): open it, or print it to PDF."""
+def _mono_in(text: str, monos) -> str:
+    """Escape text, then wrap each listed literal (a MAC, a folder) in the mono style."""
+    out = html.escape(text)
+    for m in sorted({x for x in monos if x}, key=len, reverse=True):
+        out = out.replace(html.escape(m), "<span class='mono'>%s</span>" % html.escape(m))
+    return out
+
+
+def render_html(report: dict, addresses=None) -> str:
+    """
+    The designed report: one self-contained light page (inline CSS, no
+    scripts, no web fonts, no links that load anything) to open in a browser
+    or print to PDF. Every piece of data is escaped.
+    """
     e = html.escape
-    start = report.get("capture_start_epoch")
-    status = report.get("status", "no incident")
-    css_class = {"incident": "incident", "contained": "contained"}.get(status, "none")
+    f = design_facts(report, addresses)
+    title = f.get("incident_id") or f["session"]
     p = []
-    p.append("<h1>Incident report - %s</h1>" % e(str(report.get("session"))))
-    p.append("<p><span class='status %s'>%s</span> <span class='muted'>capture time %s</span></p>"
-             % (css_class, e(status.upper()), e(clock_text(report.get("now_seconds"), start))))
-    p.append("<h2>1. What happened</h2><p>%s</p>" % e(report["what_happened"]["sentence"]))
-    if report.get("wording", {}).get("source") == "llm":
-        p.append("<p><i>In other words:</i> %s</p>" % e(report["wording"]["headline"]))
-    if status != "no incident":
-        c = report.get("containment") or {}
-        if c.get("available"):
-            p.append("<p><b>%s</b></p>" % e(containment_line(c, start)))
-        w = report["when"]
-        p.append("<h2>2. When</h2><p>%s</p>" % e(w["sentence"]))
-        if report.get("acknowledged"):
-            p.append("<p>%s</p>" % e(acknowledged_line(report["acknowledged"])))
-        if w["abnormal_minutes"]:
-            p.append("<table><tr><th>abnormal minute</th><th>score</th></tr>%s</table>" % "".join(
-                "<tr><td>%s</td><td>%.1f</td></tr>" % (e(m["text"]), m["score"])
-                for m in w["abnormal_minutes"]))
-        where = report["where"]
-        p.append("<h2>3. Where it started</h2><p>%s</p>" % e(where["sentence"]))
-        p.append("<table><tr><th>#</th><th>device</th><th>abnormal from</th><th>how it ranked</th>"
-                 "</tr>%s</table>" % "".join(
-                     "<tr><td>%d</td><td><code>%s</code></td><td>%s</td><td>%s</td></tr>"
-                     % (r["position"], e(r["device"]), e(r["onset_text"]), e(r["explanation"]))
-                     for r in where["ranking"]))
-        for key, words in (("cleared", "Stayed normal"), ("not_judged", "Not judged"),
-                           ("unseen", "Not seen")):
-            if where.get(key):
-                p.append("<p>%s: %s</p>" % (words, e(", ".join(where[key]))))
-        p.append("<h2>4. How</h2>")
-        pats = report["how"]["patterns"]
-        p.append("<ul>%s</ul>" % "".join("<li>%s</li>" % e(s) for s in report["how"]["sentences"]))
-        if pats:
-            p.append("<table><tr><th>destination</th><th>connections</th><th>first</th>"
-                     "<th>typical gap</th><th>bytes sent / back</th><th>ids</th></tr>%s</table>"
-                     % "".join("<tr><td><code>%s</code></td><td>%d</td><td>%s</td><td>%s</td>"
-                               "<td>%d / %d</td><td>%s</td></tr>"
-                               % (e(x["label"]), x["count"], e(clock_text(x["first_seconds"], start)),
-                                  e("~%d s" % round(x["typical_gap_seconds"])
-                                    if x["typical_gap_seconds"] is not None else "-"),
-                                  x["typical_bytes_out"], x["typical_bytes_in"],
-                                  e(", ".join(x["conn_ids"]))) for x in pats))
-        why = report["why"]
-        p.append("<h2>5. Why we believe it</h2><p>%s</p>" % e(why["sentence"]))
-        p.append("<p>Score per minute (the line is %.1f): %s</p>" % (why["threshold"], " &middot; ".join(
-            "<span class='%s'>%s %.1f</span>" % ("over" if m["over"] else "", e(m["text"]), m["score"])
-            for m in why["minutes"])))
-        if why["moved"]:
-            p.append("<table><tr><th>measurement</th><th>normally</th><th>during the attack</th>"
-                     "</tr>%s</table>" % "".join(
-                         "<tr><td>%s</td><td>%s</td><td>%s</td></tr>"
-                         % (e(m["words"]), m["normal"], m["during"]) for m in why["moved"]))
-        else:
-            p.append("<p class='muted'>No single measurement moved far on its own; the second "
-                     "opinion (IsolationForest, all seven together) carried the score.</p>")
-        p.append("<p>Evidence connections: <code>%s</code></p>" % e(", ".join(why["evidence_ids"])))
-        imp = report["impact"]
-        p.append("<h2>6. Impact</h2><p>%s</p><ul>%s</ul>" % (e(imp["sentence"]), "".join(
-            "<li><code>%s</code> talked to: %s</li>" % (e(dev), e(", ".join(
-                "%s%s x%d" % (r["label"], " (NEW)" if r["new"] else "", r["count"]) for r in rows)))
-            for dev, rows in imp["reach"].items())))
-        p.append("<h2>7. What to do</h2><p class='muted'>Recommended - the operator acts; "
-                 "nothing is done automatically.</p><ol>")
-        for step in report["playbook"]:
-            p.append("<li><b>[%s] %s</b><ul>%s</ul></li>" % (
-                e(step["urgency"].upper()), e(step["title"]),
-                "".join("<li>%s</li>" % e(d) for d in step["do"])))
-        p.append("</ol>")
-        p.append("<h2>8. What we are not sure about</h2><ul>%s</ul>"
-                 % "".join("<li>%s</li>" % e(u) for u in report["unsure"]))
-    p.append("<p class='muted'>%s. Generated %s.</p>" % (
-        e(report.get("wording", {}).get("note", "")), e(datetime.now().strftime("%Y-%m-%d %H:%M:%S"))))
+    sub = ", ".join(x for x in (f.get("date"), "session %s" % f["session"]) if x)
+    if f["status"] in ("no incident", "failed", None):
+        p.append("<header class='head'><div><div class='org'>IoT Incident Attribution, incident "
+                 "report</div><h1>No incident</h1></div><div class='id'>%s<small>%s</small></div>"
+                 "</header>" % (e(f["session"]), e(sub)))
+        p.append("<section><h2>What happened</h2><p class='summary'>%s</p></section>"
+                 % e(f["summary"]))
+    else:
+        head = ("%s <span class='dev'>%s</span>" % (e(f["headline"]), e(f["device"]))
+                if f["device"] else e(f["headline"]))
+        p.append("<header class='head'><div><div class='org'>IoT Incident Attribution, incident "
+                 "report</div><h1>%s</h1><div class='tags'>%s</div></div>"
+                 "<div class='id'>%s<small>%s</small></div></header>"
+                 % (head, "".join("<span class='tag %s'>%s</span>" % (c, e(t)) for c, t in f["tags"]),
+                    e(f.get("incident_id") or ""), e(sub)))
+        p.append("<div class='keys'>%s</div>" % "".join(
+            "<div><div class='v'>%s</div><div class='k'>%s</div></div>" % (e(v), e(k))
+            for v, k in f["keys"]))
+        p.append("<section><h2>What happened</h2><p class='summary'>%s</p>"
+                 "<p class='source%s'>%s%s</p></section>"
+                 % (e(f["summary"]), "" if f["by_ai"] else " tpl",
+                    "&#10003; " if f["by_ai"] else "", e(f["source"])))
+        if f["timeline"]:
+            p.append("<section><h2>Timeline</h2><div class='tl'>%s</div></section>" % "".join(
+                "<div class='%s'><b>%s</b><span>%s</span></div>" % (c, e(t), e(w))
+                for t, w, c in f["timeline"]))
+        rows = "".join("<tr><td class='mono'>%s</td><td class='n'><b>%d</b></td>"
+                       "<td class='n'><b>%s</b></td><td class='n'><b>%d</b> / %d</td></tr>"
+                       % (e(r["destination"]), r["count"], e(r["gap"]), r["bytes_out"], r["bytes_in"])
+                       for r in f["found"])
+        found = ("<table><tr><th>New destination</th><th>Connections</th><th>Gap</th>"
+                 "<th>Bytes out / back</th></tr>%s</table>" % rows) if rows else ""
+        ids = (" Evidence connections: <span class='mono'>%s</span>." % e(", ".join(f["evidence_ids"]))
+               if f["evidence_ids"] else "")
+        bars = "".join("<i class='%s' style='height:%.0f%%'></i>"
+                       % (" ".join(c for c in ("over" if b["over"] else "",
+                                               "base" if b["baseline"] else "",
+                                               "capped" if b["capped"] else "") if c),
+                          100 * b["height"]) for b in f["bars"])
+        p.append("<section class='two'><div><h2>How it was found</h2>%s<p class='cap'>%s%s</p></div>"
+                 "<div><h2>Why we believe it</h2><div class='bars' role='img' aria-label='%s score "
+                 "per minute, alert line %.1f'>%s<span class='line' style='bottom:%.0f%%'></span>"
+                 "</div><p class='cap'>%s</p></div></section>"
+                 % (found, e(f["found_note"]), ids, e(f["device"] or "suspect"), f["threshold"],
+                    bars, 100 * f["line_height"], e(f["why_caption"])))
+        if f["techniques"]:
+            p.append("<section><h2>Attack techniques seen (MITRE ATT&amp;CK)</h2>"
+                     "<p class='cap' style='margin:0 0 6px'>Consistent with these techniques, "
+                     "judged from the traffic's shape only.</p><div class='tech'>%s</div></section>"
+                     % "".join("<b>%s</b><span><b>%s.</b> %s</span>"
+                               % (e(t["id"]), e(t["name"]), e(t["evidence"]))
+                               for t in f["techniques"]))
+        p.append("<section><h2>What to do</h2><p class='cap' style='margin:0 0 4px'>Recommended - "
+                 "the operator acts; nothing is done automatically.</p><ul class='steps'>%s</ul>"
+                 "</section>" % "".join(
+                     "<li class='%s'><span class='box'></span><span class='when%s'>%s</span>"
+                     "<span><b>%s</b> %s</span></li>"
+                     % ("done" if s["done"] else "", " later" if s["later"] else "", e(s["when"]),
+                        e(s["title"]), _mono_in(s["text"], s["mono"])) for s in f["steps"]))
+        sha = ("<p class='cap' style='margin:0 0 8px'>SHA-256 of the capture file list: "
+               "<span class='mono'>%s</span></p>" % e(f["sha256"])) if f.get("sha256") else ""
+        p.append("<section><h2>Evidence and limits</h2>%s<div class='note'><ul>%s</ul></div>"
+                 "<p class='cap'>%s</p></section>"
+                 % (sha, "".join("<li>%s</li>" % e(x) for x in f["limits"]),
+                    e("Severity rule: " + f["severity_rule"])))
+        p.append("<div class='foot'><span>%s</span><span>%s</span></div>"
+                 % (e(f["footer"]), e(f.get("incident_id") or "")))
+    p.append("<p class='cap muted'>Generated %s.</p>" % e(datetime.now().strftime("%Y-%m-%d %H:%M:%S")))
     return ("<!DOCTYPE html><html lang='en'><head><meta charset='utf-8'><title>Incident report - %s"
             "</title><style>%s</style></head><body>%s</body></html>"
-            % (e(str(report.get("session"))), _CSS, "\n".join(p)))
+            % (e(title), _CSS, "\n".join(p)))
 
 
 def write_html(report: dict, reports_dir: Path = REPORTS_DIR) -> Path:
@@ -912,6 +1420,80 @@ def write_html(report: dict, reports_dir: Path = REPORTS_DIR) -> Path:
     tmp.write_text(render_html(report), encoding="utf-8")
     tmp.replace(path)
     return path
+
+
+# --------------------------------------------------------------------------
+# The PDF (Step P3): the browser Windows 11 already has prints the page
+# --------------------------------------------------------------------------
+#
+# No PDF library: Microsoft Edge (installed with Windows 11) prints the same
+# HTML to PDF from the command line, colours included. Chrome is the second
+# choice. Tried on this laptop on 15 Nov 2026: reports\live_session_07.html
+# -> PDF in about 3 s.
+#
+# THE FRESH --user-data-dir MATTERS: if Edge is already open, a plain
+# `msedge --headless ...` is handed to the running Edge, which ignores it and
+# no file appears. A new empty profile folder makes it a separate browser.
+# Arguments go as a list (the repo path has a space in it).
+
+PDF_TIMEOUT_SECONDS = 45
+
+
+def find_browser() -> str | None:
+    """msedge.exe in either Program Files folder (or the user's), else Chrome; else None."""
+    roots = [os.environ.get(v) for v in ("PROGRAMFILES(X86)", "PROGRAMFILES", "LOCALAPPDATA")]
+    roots += [r"C:\Program Files (x86)", r"C:\Program Files"]
+    for relative in (r"Microsoft\Edge\Application\msedge.exe",
+                     r"Google\Chrome\Application\chrome.exe"):
+        for root in roots:
+            if root and Path(root, relative).is_file():
+                return str(Path(root, relative))
+    for name in ("msedge", "chrome", "chromium", "chromium-browser", "google-chrome"):
+        found = shutil.which(name)
+        if found:
+            return found
+    return None
+
+
+def html_to_pdf(html_path, pdf_path=None, browser: str | None = None,
+                timeout: float = PDF_TIMEOUT_SECONDS) -> Path | None:
+    """
+    Print an HTML file to PDF with headless Edge (or Chrome). Returns the PDF's
+    path, or None on ANY failure (no browser, timeout, no file) - the HTML is
+    always there as the fallback, so a missing PDF never stops anything.
+    """
+    try:
+        html_path = Path(html_path).resolve()
+        if not html_path.is_file():
+            return None
+        pdf_path = Path(pdf_path) if pdf_path else html_path.with_suffix(".pdf")
+        pdf_path = pdf_path.resolve()
+        browser = browser or find_browser()
+        if not browser:
+            return None
+        if pdf_path.exists():
+            pdf_path.unlink()
+        profile = tempfile.mkdtemp(prefix="iot_pdf_")
+        try:
+            subprocess.run([browser, "--headless", "--disable-gpu", "--no-pdf-header-footer",
+                            "--no-first-run", "--user-data-dir=%s" % profile,
+                            "--print-to-pdf=%s" % pdf_path, html_path.as_uri()],
+                           stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                           timeout=timeout, check=False)
+        finally:
+            shutil.rmtree(profile, ignore_errors=True)
+        if pdf_path.is_file() and pdf_path.stat().st_size > 0:
+            with open(pdf_path, "rb") as handle:
+                if handle.read(5) == b"%PDF-":
+                    return pdf_path
+        return None
+    except Exception:                 # noqa: BLE001 - None means "no PDF", whatever the cause
+        return None
+
+
+def write_pdf(report: dict, reports_dir: Path = REPORTS_DIR) -> Path | None:
+    """reports/<session>.html (written fresh) printed to reports/<session>.pdf, or None."""
+    return html_to_pdf(write_html(report, reports_dir))
 
 
 # --------------------------------------------------------------------------
@@ -953,6 +1535,8 @@ def main(argv=None) -> int:
     parser.add_argument("--llm", choices=["local", "cloud"], default=None,
                         help="also ask a language model for a headline (validated; optional)")
     parser.add_argument("--no-html", action="store_true", help="do not write reports/<run>.html")
+    parser.add_argument("--pdf", action="store_true",
+                        help="also print it to reports/<run>.pdf with Edge (Step P3)")
     args = parser.parse_args(argv)
     try:
         report = report_for_run(args.run_id, pcap=args.pcap, llm=args.llm)
@@ -963,6 +1547,11 @@ def main(argv=None) -> int:
     print(render_text(report))
     if not args.no_html:
         print("\n  wrote %s" % write_html(report))
+    if args.pdf:
+        pdf = write_pdf(report)
+        print("  wrote %s" % pdf if pdf else
+              "  no PDF (Edge/Chrome not found or it failed) - open the HTML and print it "
+              "to PDF from the browser")
     print()
     return 0
 

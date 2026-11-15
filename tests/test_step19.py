@@ -137,7 +137,7 @@ def test_contained_after_90_quiet_seconds_and_only_after_an_alert(now, alert, co
     assert c["contained"] is contained
     if contained:
         assert c["contained_seconds"] == 1040.0
-        assert incident.containment_line(c).startswith("CONTAINED at 00:17:20")
+        assert incident.containment_line(c).startswith("Contained at 00:17:20")   # P3: sentence case
 
 
 def test_without_a_named_device_or_pattern_there_is_no_containment_check():
@@ -250,9 +250,13 @@ def test_a_real_attack_report_is_complete_without_any_language_model(monkeypatch
     assert "30:76:f5:e4:eb:60" in r["playbook"][0]["do"][0]
     assert r["when"]["time_to_detect_seconds"] > 0
     json.dumps(r)                                    # plain data
-    page = incident.render_html(r)
+    # Step P3: the HTML is the designed short report; the eight sections stay
+    # in the dict and in render_text.
+    text = incident.render_text(r)
     for n in range(1, 9):
-        assert "<h2>%d. " % n in page
+        assert "\n%d. " % n in text
+    page = incident.render_html(r)
+    assert "What to do" in page and "Timeline" in page
     assert "<script" not in page and "http" not in page.split("</style>")[1]
 
 
@@ -269,7 +273,7 @@ def test_a_simulated_spread_says_spread_and_a_quiet_run_says_no_incident():
                      device_names=["dev-a"], baseline_seconds=60, baseline_windows=1)
     r = incident.build_incident(quiet, detect.Detection(), attribute.Attribution())
     assert r["status"] == "no incident" and "No incident" in incident.render_text(r)
-    assert "<h2>2." not in incident.render_html(r)
+    assert "Timeline" not in incident.render_html(r)
 
 
 def test_a_validated_model_headline_is_added_and_anything_else_is_not():
@@ -373,7 +377,7 @@ def test_pulling_the_power_gives_contained_90_s_after_the_last_beacon(tmp_path):
     # The verdict does not change because the board went quiet.
     assert s.result.named == "esp32-03"
     html_text = (tmp_path / "reports" / "cut.html").read_text(encoding="utf-8")
-    assert "CONTAINED at" in html_text
+    assert "Contained, 90 s of silence" in html_text and "Severity high" in html_text
 
 
 # --------------------------------------------------------------------------
@@ -396,7 +400,7 @@ def test_the_page_shows_the_report_and_the_contained_banner(tmp_path):
     assert not at.exception, [e.value for e in at.exception]
     shown = texts(at)
     assert "Contained at " in shown and "Offline, contained" in shown
-    assert "Incident report" in [s.value for s in at.subheader]
-    assert "8. What we are not sure about" in shown
-    assert "connections to broker:4444 every ~30 s" in shown
-    assert len(at.get("download_button")) == 1
+    assert "Incident report" in shown                       # P3: the report's design
+    assert "8. What we are not sure about" in shown         # under "Full technical detail"
+    assert "connections to 192.168.0.200:4444 every ~30 s" in shown    # P3: addresses
+    assert [d.proto.label for d in at.get("download_button")] == ["Download HTML"]

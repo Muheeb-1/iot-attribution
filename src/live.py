@@ -156,6 +156,12 @@ ACK_FILE = "ack.json"               # written by the live page's Acknowledge but
 REPLAY_SOURCE = "replay_source"     # where --replay keeps the cut-up capture
 CAPTURE_MARKER = "CAPTURING"        # written by src/live_capture.py while it records
 
+# Step P3: at STOP the designed report is also printed to reports/<session>.pdf
+# with the Edge that Windows 11 has (incident.html_to_pdf; ~3 s). No PDF is not
+# an error: the HTML is always written. The tests switch this off so they do
+# not start a browser for every finished session.
+WRITE_PDF = True
+
 # A minute is "closed" this long after its end. Packets are timestamped when
 # the adapter sees them, and the last few of a minute can land in the next
 # capture file; five seconds is generous for that and costs five seconds of
@@ -401,6 +407,7 @@ class LiveSession:
         self.addresses: dict = {}           # device -> last IP seen (for the report)
         self.evidence = None                # SHA-256 list of the files, at STOP
         self.report_file = None             # reports/<session>.html once written
+        self.pdf_file = None                # reports/<session>.pdf, written at STOP (Step P3)
         self.analysis_seconds = None        # how long the last cycle took
         self.replaying = False              # set by replay(): the recording's clock, not ours
         self.alert_wall_epoch = None        # this laptop's clock when the first alert was raised
@@ -597,6 +604,15 @@ class LiveSession:
         except OSError as exc:
             print("  [live] could not write the report: %s" % exc, file=sys.stderr)
 
+    def _write_pdf(self) -> None:
+        """The designed report as a PDF, at STOP. Presentation: None is fine."""
+        if not WRITE_PDF or self.report_file is None:
+            return
+        self.pdf_file = incident.html_to_pdf(self.report_file)
+        if self.pdf_file is None:
+            print("  [live] no PDF (Edge/Chrome not found or it failed); the HTML report is "
+                  "at %s" % self.report_file, file=sys.stderr)
+
     def _record_first_alert(self, now: float, final: bool) -> None:
         """
         Remember the first alert, once. The earliest the method could know is
@@ -745,6 +761,7 @@ class LiveSession:
             self._read_acknowledgement()
             self._attach_acknowledgement()
             self._write_report()
+            self._write_pdf()
             if save:
                 self.save(force=force)
         self._log_phase(STOPPED)
@@ -871,6 +888,7 @@ class LiveSession:
             "incident": self.incident,
             "containment": self.containment,
             "report_file": None if self.report_file is None else str(self.report_file),
+            "pdf_file": None if self.pdf_file is None else str(self.pdf_file),
             "addresses": dict(self.addresses),
             "first_alert": self.first_alert,
             "first_alert_epoch": alert.get("raised_epoch"),

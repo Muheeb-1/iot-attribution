@@ -158,7 +158,12 @@ def test_the_report_gains_one_line_and_one_field():
     line = incident.acknowledged_line(ack)
     assert line.endswith("14 s after the alert.")
     assert line in incident.render_text(with_ack)
-    assert line in incident.render_html(with_ack)
+    # Step P3: the designed page shows it as the "to acknowledge" figure and a
+    # timeline point instead of the sentence.
+    page = incident.render_html(with_ack)
+    assert ">14 s</div><div class='k'>to acknowledge" in page
+    assert "Acknowledged by operator" in page
+    assert "Acknowledged by operator" not in incident.render_html(report)
     assert line not in incident.render_text(report)
     assert incident.with_acknowledgement(report, None) is report
 
@@ -263,7 +268,7 @@ def test_a_replay_with_an_acknowledgement_changes_nothing_but_the_acknowledgemen
     assert final["incident"]["acknowledged"]["acknowledged_epoch"] == pytest.approx(
         ack["acknowledged_epoch"])
     report_file = Path(final["report_file"])
-    assert "Acknowledged by the operator at" in report_file.read_text(encoding="utf-8")
+    assert "Acknowledged by operator" in report_file.read_text(encoding="utf-8")   # P3 design
 
 
 # --------------------------------------------------------------------------
@@ -333,6 +338,11 @@ def band_html(at):
     return next(e.proto.body for e in at.get("html") if 'class="iot band' in e.proto.body)
 
 
+def alarm_buttons(at):
+    """The page's buttons apart from Step P3's "Create PDF" (the report area's own)."""
+    return [b.label for b in at.button if b.key != "report-pdf-create"]
+
+
 def incident_state():
     state = fresh(fixture("incident"))
     state.update(replaying=True, first_alert_wall_epoch=time.time() - 14)
@@ -344,7 +354,7 @@ def test_an_unacknowledged_incident_has_the_ring_the_button_and_the_tone(tmp_pat
     place(tmp_path, state)
     at = render(tmp_path, state["session"])
     assert "ringing" in band_html(at)
-    assert [b.label for b in at.button] == ["Acknowledge"]
+    assert alarm_buttons(at) == ["Acknowledge"]
     assert len(at.get("audio")) == 1
 
 
@@ -369,7 +379,7 @@ def test_the_sound_switch_turns_off_only_the_tone(tmp_path):
     place(tmp_path, state)
     at = render(tmp_path, state["session"], sound=False)
     assert len(at.get("audio")) == 0
-    assert [b.label for b in at.button] == ["Acknowledge"] and "ringing" in band_html(at)
+    assert alarm_buttons(at) == ["Acknowledge"] and "ringing" in band_html(at)
     assert "Alert sound" in [t.label for t in at.sidebar.toggle]
 
 
@@ -379,7 +389,7 @@ def test_an_acknowledgement_already_in_the_state_needs_no_button(tmp_path):
         state["first_alert"]["raised_epoch"] + 20, state["first_alert"])
     place(tmp_path, state)
     at = render(tmp_path, state["session"])
-    assert not at.button and not at.get("audio")
+    assert not alarm_buttons(at) and not at.get("audio")
     assert "20 s" in band_html(at)
 
 
@@ -388,5 +398,5 @@ def test_no_alarm_outside_an_unacknowledged_incident(tmp_path, name):
     state = fresh(fixture(name))
     place(tmp_path, state)
     at = render(tmp_path, state["session"])
-    assert not at.button and not at.get("audio")
+    assert not alarm_buttons(at) and not at.get("audio")
     assert "ringing" not in band_html(at)
