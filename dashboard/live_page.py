@@ -1,20 +1,30 @@
 """
-THE LIVE PAGE - the dashboard while the capture is still running.
+THE LIVE PAGE - the console while the capture is still running.
 
 WHAT IT SHOWS
 -------------
 It reads pcap/live/<session>/state.json, which the live engine (src/live.py)
-rewrites every second or so, and redraws itself every 3 seconds:
+rewrites every second or so, and redraws itself every 3 seconds. The look is
+docs/design/console_mockup.html (Step P1 of docs/POLISH_PLAN.md); the HTML
+pieces come from dashboard/theme.py.
 
-  WAITING     no capture yet: the exact commands to start one
-  LEARNING    the baseline countdown - do not attack yet
-  MONITORING  "safe to launch the attack"; every device's strike meter
-  INCIDENT    red banner: which device it started from, how sure, since when;
-              the network, the suspects, the full incident report (Step 19)
-  CONTAINED   green banner on top of the report: the named device has made no
-              connection to its new destinations for 90 s
-  STOPPED     the final verdict (identical to the offline analysis), where the
-              session was saved, and the "reveal the true answer" tick
+  top bar      brand, the two pages, capture status, session, clock
+  status band  the one loud thing on the page - one colour, word and icon per
+               phase:
+                 WAITING     no capture yet: the exact commands to start one
+                 LEARNING    "Learning normal behaviour. Minute 7 of 12."
+                 MONITORING  "Monitoring 3 devices" (or "Watching esp32-03"
+                             when a device is part-way to an alert)
+                 INCIDENT    "The attack started on esp32-03"
+                 CONTAINED   "Contained at 19:34:49"
+                 STOPPED     the final verdict (identical to the offline
+                             analysis)
+  device lanes one bar per device per minute, on one scale, with the line
+  right card   "This session" before a verdict, "How it was found" after
+  report area  the timeline and the full incident report (Step 19; restyled
+               in P3), the network and suspects in an expander
+  Lab validation  collapsed, at the bottom: the test-attack command and
+               "Compare with the recorded answer"
 
 All times on the page are wall-clock times (capture start + seconds), so they
 can be compared with the clock on the wall and with the attack command.
@@ -24,28 +34,29 @@ THE PAGE DECIDES NOTHING
 Every number on it comes from state.json, which the engine produced with the
 unchanged pipeline. To draw the network and the suspect list the page rebuilds
 the engine's Attribution and Detection objects FROM state.json
-(objects_from_state) and hands them to the same functions the replay page
-uses - network_figure and ranking_rows in dashboard/app.py. Nothing is
+(objects_from_state) and hands them to the same functions the Past sessions
+page uses - network_figure and ranking_rows in dashboard/app.py. Nothing is
 re-detected or re-ranked here; a test checks the rebuilt objects give exactly
 the rows the engine's own objects give.
 
-THE STRIKE METER IS NOT AN ALARM
---------------------------------
+ONE ABNORMAL MINUTE IS NOT AN ALARM
+-----------------------------------
 One abnormal minute names nobody. In the twelve real attacks the innocent
 laptop had at least one abnormal minute in nine of them; alerting on one
 minute would have blamed it most of the time. The detector waits for three in
-a row (docs/LIVE_PLAN.md section 7). So the meter is drawn as a plain
-"watching: 2 of 3 minutes" bar, never in alarm colours; only the incident
-banner, which appears after the third minute, is red.
+a row (docs/LIVE_PLAN.md section 7). So a device part-way there is shown as
+"Watching 2 of 3" in amber, never in the alert colour; only the incident,
+which appears after the third minute, is red.
 
 THE ANSWER SHEET
 ----------------
-The reveal tick reads the answer file only once the session is STOPPED, i.e.
-after the analysis has completely finished, exactly like the replay page.
+"Compare with the recorded answer", in the collapsed Lab validation section,
+reads the answer file only once the session is STOPPED, i.e. after the
+analysis has completely finished, exactly like the Past sessions page.
 
 RUN IT
 ------
-    streamlit run dashboard/app.py          -> "Live monitor" in the sidebar
+    streamlit run dashboard/app.py          -> "Live monitor" in the top bar or sidebar
     streamlit run dashboard/live_page.py    -> this page on its own
 """
 
@@ -56,7 +67,6 @@ import os
 import re
 import sys
 import time
-from datetime import datetime
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -65,10 +75,10 @@ if str(ROOT) not in sys.path:
 
 import networkx as nx
 import pandas as pd
-import plotly.graph_objects as go
 import streamlit as st
 
-from dashboard import app
+from dashboard import app, theme
+from dashboard.theme import duration_text, wall, wall_at  # noqa: F401  (used by tests too)
 from src import attribute, detect, incident, live, runs
 
 REFRESH_SECONDS = 3
@@ -76,20 +86,6 @@ REFRESH_SECONDS = 3
 # The engine rewrites state.json about once a second while a session runs.
 # Silence for this long means it has stopped or crashed.
 STALE_SECONDS = 20
-
-# The score chart: attack minutes can score in the hundreds, which would flatten
-# everything else into a line on the floor. Scores above this are drawn at the
-# top edge, with the real value on hover.
-SCORE_CHART_CAP = 25.0
-
-PHASE_LABEL = {
-    live.WAITING: "Waiting for the capture",
-    live.LEARNING: "Learning what normal looks like",
-    live.MONITORING: "Monitoring",
-    live.INCIDENT: "INCIDENT",
-    live.CONTAINED: "Contained",
-    live.STOPPED: "Capture stopped - final verdict",
-}
 
 
 # --------------------------------------------------------------------------
@@ -150,23 +146,8 @@ def is_replay(live_dir: Path, session: str) -> bool:
 
 
 # --------------------------------------------------------------------------
-# Time
+# Time (wall, wall_at and duration_text live in dashboard/theme.py)
 # --------------------------------------------------------------------------
-
-def wall(epoch) -> str:
-    """Local clock time, HH:MM:SS."""
-    if epoch is None:
-        return "-"
-    return datetime.fromtimestamp(float(epoch)).strftime("%H:%M:%S")
-
-
-def wall_at(state: dict, seconds) -> str:
-    """Seconds into the capture -> local clock time."""
-    start = state.get("capture_start_epoch")
-    if start is None or seconds is None:
-        return "-"
-    return wall(start + float(seconds))
-
 
 def capture_clock_to_wall(state: dict, text: str) -> str:
     """'00:16:00' (seconds-from-start, as the brief writes it) -> wall clock."""
@@ -175,16 +156,6 @@ def capture_clock_to_wall(state: dict, text: str) -> str:
         return str(text)
     h, m, s = (int(x) for x in match.groups())
     return wall_at(state, h * 3600 + m * 60 + s)
-
-
-def duration_text(seconds) -> str:
-    """3 min 45 s, for countdowns and 'time to detect'."""
-    if seconds is None:
-        return "-"
-    seconds = max(0, int(round(seconds)))
-    if seconds < 60:
-        return "%d s" % seconds
-    return "%d min %02d s" % (seconds // 60, seconds % 60)
 
 
 def seconds_since_update(state: dict, now: float | None = None) -> float | None:
@@ -210,117 +181,13 @@ def baseline_progress(state: dict) -> dict:
     """How far through the baseline, and when it will be complete."""
     total = int(state.get("baseline_windows") or 0)
     done = min(int(state.get("closed_windows") or 0), total)
-    start = state.get("capture_start_epoch")
-    ends_seconds = (state.get("baseline_seconds") or 0) + (state.get("grace_seconds") or 0)
     return {
         "done": done,
         "total": total,
         "fraction": (done / total) if total else 0.0,
         "remaining_seconds": state.get("baseline_remaining_seconds"),
-        "ends_at": wall(start + ends_seconds) if start is not None else "-",
+        "ends_at": wall(theme.baseline_end_epoch(state)),
     }
-
-
-def device_rows(state: dict) -> list:
-    """
-    One row per device for the watch panel: the strike count and a plain
-    label. The label never says "attack" - a strike is something to watch,
-    not an accusation (see the module docstring).
-    """
-    consecutive = int(state.get("consecutive") or detect.CONSECUTIVE)
-    threshold = state.get("threshold") or detect.THRESHOLD
-    learning = state.get("phase") in (live.WAITING, live.LEARNING)
-    rows = []
-    for name, d in (state.get("devices") or {}).items():
-        strikes = int(d.get("strikes") or 0)
-        score = d.get("latest_score")
-        contained = (state.get("containment") or {})
-        if not d.get("seen"):
-            status, label = "unseen", "not seen in this capture"
-        elif d.get("onset") is not None and contained.get("contained") \
-                and contained.get("device") == name:
-            # Unplugged or blocked: still marked abnormal by the detector (it
-            # went silent), but it is not attacking any more.
-            status = "contained"
-            label = "offline / contained since %s (abnormal since %s)" % (
-                wall(contained.get("contained_epoch")), wall(d.get("onset_epoch")))
-        elif d.get("onset") is not None:
-            status = "flagged"
-            label = "abnormal since %s (%d of %d minutes over the line)" % (
-                wall(d.get("onset_epoch")), consecutive, consecutive)
-        elif d.get("skipped"):
-            status, label = "skipped", "too little traffic in the baseline to judge"
-        elif learning or score is None:
-            status, label = "learning", "learning its normal pattern"
-        elif strikes:
-            status = "watching"
-            label = "watching: %d of %d minutes in a row over the line" % (strikes, consecutive)
-        else:
-            status = "normal"
-            label = "normal (last minute scored %.1f, the line is %.1f)" % (score, threshold)
-        rows.append({"device": name, "kind": d.get("kind", ""), "status": status,
-                     "strikes": strikes, "fraction": min(1.0, strikes / consecutive),
-                     "label": label})
-    return rows
-
-
-def headline(state: dict) -> dict:
-    """
-    The banner at the top: kind (info/success/error/warning), a title and one
-    sentence. Everything a person in the room needs to know at a glance.
-    """
-    phase = state.get("phase", live.WAITING)
-    named = state.get("named")
-    alert = state.get("first_alert") or {}
-    confidence = state.get("confidence_percent")
-
-    if phase == live.WAITING:
-        return {"kind": "info", "title": "Waiting for the capture to start",
-                "text": "No capture file has arrived yet."}
-    if phase == live.LEARNING:
-        p = baseline_progress(state)
-        return {"kind": "info", "title": "Learning what normal looks like - do not attack yet",
-                "text": "Minute %d of %d of the baseline. Complete at %s (in about %s). "
-                        "Anything that happens now is learned as normal."
-                        % (p["done"], p["total"], p["ends_at"],
-                           duration_text(p["remaining_seconds"]))}
-    if phase == live.MONITORING:
-        ended = wall_at(state, (state.get("baseline_seconds") or 0)
-                        + (state.get("grace_seconds") or 0))
-        return {"kind": "success", "title": "Monitoring - safe to launch the attack",
-                "text": "Baseline learned at %s. Every device is being watched; "
-                        "nothing has been abnormal for %d minutes in a row."
-                        % (ended, int(state.get("consecutive") or detect.CONSECUTIVE))}
-
-    # INCIDENT, CONTAINED, STOPPED all carry a verdict, if there is one.
-    if not state.get("onsets"):
-        if phase == live.STOPPED:
-            return {"kind": "success", "title": "Capture stopped - no incident",
-                    "text": "No device was abnormal for %d minutes in a row."
-                            % int(state.get("consecutive") or detect.CONSECUTIVE)}
-        return {"kind": "info", "title": PHASE_LABEL.get(phase, phase), "text": ""}
-
-    since = wall(alert.get("raised_epoch"))
-    contained = state.get("containment") or {}
-    if phase == live.CONTAINED and contained.get("contained"):
-        return {"kind": "success",
-                "title": "Contained at %s - %s has stopped" % (
-                    wall(contained.get("contained_epoch")), contained.get("device")),
-                "text": "No connection from %s to %s since %s. The incident report below "
-                        "stays as the record; stop the capture when you are ready."
-                        % (contained.get("device"), ", ".join(contained.get("watching") or []),
-                           wall(contained.get("last_seen_epoch")))}
-    prefix = "Final verdict: " if phase == live.STOPPED else ""
-    if state.get("abstained"):
-        return {"kind": "warning",
-                "title": "%sIncident - starting device not certain" % prefix,
-                "text": "Too close to call between %s (gap %s%%). Alert raised at %s."
-                        % (", ".join(state.get("shortlist") or []), confidence, since)}
-    return {"kind": "error" if phase == live.INCIDENT else "warning",
-            "title": "%sIncident - the attack started on %s" % (prefix, named),
-            "text": "Confidence %s%%. %s first abnormal at %s; alert raised at %s."
-                    % (confidence, named, wall((state.get("devices") or {})
-                                               .get(named, {}).get("onset_epoch")), since)}
 
 
 def rejoin_lines(state: dict) -> list:
@@ -362,7 +229,7 @@ def verdict_change_lines(state: dict) -> list:
 
 
 # --------------------------------------------------------------------------
-# Rebuilding the engine's objects, so the replay page's drawings can be reused
+# Rebuilding the engine's objects, so the Past sessions drawings can be reused
 # --------------------------------------------------------------------------
 
 def objects_from_state(state: dict):
@@ -421,58 +288,6 @@ def objects_from_state(state: dict):
     return run, detection, result
 
 
-def score_figure(state: dict) -> go.Figure:
-    """
-    Each device's score for every finished minute, against the threshold line,
-    in wall-clock time. Points are drawn in the middle of their minute.
-    """
-    figure = go.Figure()
-    start = state.get("capture_start_epoch")
-    width = int(state.get("window_seconds") or 60)
-    threshold = float(state.get("threshold") or detect.THRESHOLD)
-    devices = state.get("devices") or {}
-    if start is None or not any(d.get("scores_by_window") for d in devices.values()):
-        figure.add_annotation(text="no minute has been scored yet", showarrow=False)
-        figure.update_layout(height=260, xaxis=dict(visible=False), yaxis=dict(visible=False))
-        return figure
-
-    def when(seconds):
-        return datetime.fromtimestamp(start + seconds)
-
-    for name, d in devices.items():
-        windows_scored = sorted((int(w), s) for w, s in (d.get("scores_by_window") or {}).items()
-                                if s is not None)
-        if not windows_scored:
-            continue
-        xs = [when(w * width + width / 2) for w, _ in windows_scored]
-        ys = [min(s, SCORE_CHART_CAP) for _, s in windows_scored]
-        hover = ["%s, minute %s-%s: score %.1f" % (name, wall(start + w * width),
-                                                   wall(start + (w + 1) * width), s)
-                 for w, s in windows_scored]
-        flagged = d.get("onset") is not None
-        figure.add_trace(go.Scatter(
-            x=xs, y=ys, mode="lines+markers", name=name,
-            line=dict(width=3 if flagged else 1.5,
-                      color=app.COLOUR_ORIGIN if name == state.get("named") else None),
-            hovertext=hover, hoverinfo="text"))
-
-    figure.add_hline(y=threshold, line=dict(color="#7f8c8d", width=2, dash="dash"),
-                     annotation_text="the line (%.1f)" % threshold,
-                     annotation_position="top left")
-    baseline_end = when(state.get("baseline_seconds") or 0)
-    figure.add_shape(type="line", x0=baseline_end, x1=baseline_end, y0=0, y1=1,
-                     yref="paper", line=dict(color="#7f8c8d", width=1, dash="dot"))
-    figure.add_annotation(x=baseline_end, y=1, yref="paper", text="baseline ends",
-                          showarrow=False, yanchor="bottom")
-    figure.update_layout(
-        height=320, margin=dict(l=10, r=10, t=30, b=10),
-        yaxis=dict(title="how unusual (score)", rangemode="tozero"),
-        xaxis=dict(title="clock time", tickformat="%H:%M"),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.35, x=0),
-        plot_bgcolor="rgba(0,0,0,0)", paper_bgcolor="rgba(0,0,0,0)")
-    return figure
-
-
 def start_commands(session: str) -> str:
     return ("# 1. ordinary PowerShell, repo root - the engine\n"
             "python -m src.live --session %s\n\n"
@@ -483,80 +298,61 @@ def start_commands(session: str) -> str:
             % (session, session))
 
 
+def containment_text(state: dict) -> str | None:
+    """The CONTAINED check in one line, or None before there is an incident."""
+    c = state.get("containment")
+    if not c:
+        return None
+    return incident.containment_line(c, state.get("capture_start_epoch"))
+
+
 # --------------------------------------------------------------------------
 # Drawing
 # --------------------------------------------------------------------------
 
-def _banner(kind: str, title: str, text: str) -> None:
-    body = "**%s**" % title + ("  \n%s" % text if text else "")
-    {"info": st.info, "success": st.success, "warning": st.warning,
-     "error": st.error}.get(kind, st.info)(body)
-
-
 def draw_waiting(live_dir: Path) -> None:
-    st.info("**Waiting for a session.** No live session has started yet.")
-    st.markdown("Start these two, in this order (the page picks the session up by itself):")
+    st.html(theme.top_bar(None))
+    st.html(theme.waiting_band(
+        "Waiting for a session",
+        "No live session has started yet. Start these two, in this order; "
+        "the page picks the session up by itself."))
     st.code(start_commands(next_session_name(live_dir)), language="powershell")
 
 
-def draw_state(state: dict, live_dir: Path, reveal: bool = False) -> None:
+def notes_under_band(state: dict) -> list:
+    """(html, kind) for the quiet notes under the band; data escaped."""
+    session = state.get("session", "?")
+    notes = []
+    if is_stale(state):
+        notes.append(("<b>The engine has not updated this page for %s.</b> Is "
+                      "<span class='mono'>python -m src.live --session %s</span> still running?"
+                      % (theme.esc(duration_text(seconds_since_update(state))),
+                         theme.esc(session)), "bad"))
+    if state.get("phase") == live.INCIDENT:
+        line = containment_text(state)
+        if line:
+            notes.append((theme.esc(line), "warn"))
+    for line in verdict_change_lines(state):
+        notes.append((theme.esc(line), "warn"))
+    if state.get("phase") == live.STOPPED and state.get("saved_run"):
+        notes.append(("Saved as <span class='mono'>data/%s.parquet</span>. The Past sessions page "
+                      "and evaluate.py can open it. This verdict is the offline analysis of the "
+                      "whole capture." % theme.esc(state["saved_run"]), ""))
+    for line in rejoin_lines(state):
+        notes.append((theme.esc(line), ""))
+    return notes
+
+
+def draw_state(state: dict, live_dir: Path) -> None:
     """The whole page for one moment of one session."""
     session = state.get("session", "?")
     phase = state.get("phase", live.WAITING)
     replaying = is_replay(live_dir, session)
 
-    top = st.columns([3, 1, 1, 1])
-    top[0].markdown("#### Session `%s`%s" % (
-        session, "  ·  replay of a recorded capture" if replaying else "  ·  live capture"))
-    top[1].metric("Clock (capture)", wall(state.get("now_epoch")))
-    top[2].metric("Packets", "{:,}".format(state.get("packets") or 0))
-    top[3].metric("Connections", "{:,}".format(state.get("flows") or 0))
-
-    if is_stale(state):
-        st.warning("The engine has not updated this page for %s. Is "
-                   "`python -m src.live --session %s` still running?"
-                   % (duration_text(seconds_since_update(state)), session))
-
-    if phase == live.WAITING:
-        _banner(**headline(state))
-        st.code(start_commands(session), language="powershell")
-        return
-
-    _banner(**headline(state))
-
-    if phase == live.LEARNING:
-        p = baseline_progress(state)
-        st.progress(p["fraction"], text="baseline: %d of %d minutes learned"
-                                        % (p["done"], p["total"]))
-    if phase == live.MONITORING:
-        st.markdown("Launch the attack from another terminal:")
-        st.code("python -m src.scenario --run %s" % session, language="powershell")
-    if phase == live.INCIDENT:
-        line = containment_text(state)
-        if line:
-            st.warning(line)
-
-    for line in verdict_change_lines(state):
-        st.caption(line)
-
-    alert = state.get("first_alert") or {}
-    if alert:
-        a, b, c = st.columns(3)
-        a.metric("First abnormal minute began", wall_at(state, alert.get("onset_seconds")))
-        b.metric("Third abnormal minute closed", wall(alert.get("closed_epoch")))
-        c.metric("Alert raised", wall(alert.get("raised_epoch")))
-
-    if phase == live.STOPPED:
-        saved = state.get("saved_run")
-        if saved:
-            st.info("Saved as `data/%s.parquet` - the Replay page and evaluate.py can open it. "
-                    "This verdict is the offline analysis of the whole capture." % saved)
-        if reveal:
-            draw_reveal(state)
-
-    rejoined = rejoin_lines(state)
-    if rejoined:
-        st.info("  \n".join(rejoined))
+    st.html(theme.top_bar(state, replaying=replaying, stale=is_stale(state)))
+    st.html(theme.status_band(state))
+    for text, kind in notes_under_band(state):
+        st.html(theme.notice(text, kind))
 
     problems = state.get("problems") or []
     if problems:
@@ -564,51 +360,30 @@ def draw_state(state: dict, live_dir: Path, reveal: bool = False) -> None:
             for p in problems:
                 st.write("- %s: %s" % (p.get("file"), p.get("problem")))
 
-    st.divider()
-    st.subheader("Every device, minute by minute")
-    st.caption("A device is only flagged after %d abnormal minutes IN A ROW - one odd "
-               "minute names nobody." % int(state.get("consecutive") or detect.CONSECUTIVE))
-    rows = device_rows(state)
-    if rows:
-        columns = st.columns(len(rows))
-        for column, row in zip(columns, rows):
-            with column:
-                st.markdown("**%s**  \n<span style='color:#7f8c8d'>%s</span>"
-                            % (row["device"], row["kind"]), unsafe_allow_html=True)
-                st.progress(row["fraction"])
-                st.caption(row["label"])
-    st.plotly_chart(score_figure(state), use_container_width=True)
-    st.caption("How high one minute goes matters less than how many in a row cross the "
-               "dashed line: the noisy laptop often has single tall spikes and is never "
-               "flagged for them; an attacked board sits just over the line minute after "
-               "minute.")
-
-    if not state.get("ranking"):
+    if phase == live.WAITING:
+        st.code(start_commands(session), language="powershell")
+        draw_lab_validation(state)
         return
 
-    run, detection, result = objects_from_state(state)
-    clock = lambda seconds: wall_at(state, seconds)  # noqa: E731
+    lanes, side = st.columns([1.6, 1], gap="medium")
+    with lanes:
+        st.html(theme.device_lanes(state))
+    with side:
+        if state.get("onsets") and (state.get("named") or state.get("abstained")):
+            st.html(theme.how_card(state))
+        else:
+            st.html(theme.session_card(state, replaying=replaying))
 
-    st.divider()
-    diagram, suspects = st.columns([3, 2])
-    with diagram:
-        st.subheader("The network")
-        st.caption("Arrows are links the analysis drew; the attack path is in red.")
-        st.plotly_chart(app.network_figure(run, detection, result, clock=clock),
-                        use_container_width=True)
-    with suspects:
-        st.subheader("Suspects")
-        st.caption("Bars show how complete a story each device explains, "
-                   "relative to the leader.")
-        for row in app.ranking_rows(result, detection, clock=clock):
-            label = "**%d. `%s`**" % (row["position"], row["device"])
-            if row["position"] == 1 and not result.abstained:
-                label += "  ← named"
-            elif row["shortlisted"]:
-                label += "  · shortlist"
-            st.markdown(label)
-            st.progress(row["bar"])
-            st.caption("went abnormal %s · %s" % (row["onset"], row["explanation"]))
+    if state.get("ranking"):
+        draw_report_area(state)
+    draw_lab_validation(state)
+
+
+def draw_report_area(state: dict) -> None:
+    """Timeline, the report (Step 19 content; P3 restyles it), network and suspects."""
+    line = theme.timeline(state)
+    if line:
+        st.html(line)
 
     if state.get("incident") and state["incident"].get("status") not in ("failed", None):
         draw_report(state)
@@ -619,13 +394,50 @@ def draw_state(state: dict, live_dir: Path, reveal: bool = False) -> None:
                        % state["incident"].get("error", "unknown error"))
         draw_brief(state)
 
+    run, detection, result = objects_from_state(state)
+    clock = lambda seconds: wall_at(state, seconds)  # noqa: E731
+    with st.expander("How the origin was chosen: the network and the suspects"):
+        diagram, suspects = st.columns([3, 2])
+        with diagram:
+            st.subheader("The network")
+            st.caption("Arrows are links the analysis drew; the attack path is in red.")
+            st.plotly_chart(theme.styled(app.network_figure(run, detection, result, clock=clock)),
+                            use_container_width=True, theme=None)
+        with suspects:
+            st.subheader("Suspects")
+            st.caption("Bars show how complete a story each device explains, "
+                       "relative to the leader.")
+            for row in app.ranking_rows(result, detection, clock=clock):
+                label = "**%d. `%s`**" % (row["position"], row["device"])
+                if row["position"] == 1 and not result.abstained:
+                    label += "  ← named"
+                elif row["shortlisted"]:
+                    label += "  · shortlist"
+                st.markdown(label)
+                st.progress(row["bar"])
+                st.caption("went abnormal %s · %s" % (row["onset"], row["explanation"]))
 
-def containment_text(state: dict) -> str | None:
-    """The CONTAINED check in one line, or None before there is an incident."""
-    c = state.get("containment")
-    if not c:
-        return None
-    return incident.containment_line(c, state.get("capture_start_epoch"))
+
+def draw_lab_validation(state: dict) -> None:
+    """
+    The lab-only part, collapsed at the bottom: the command that starts the
+    test attack, and the check against the answer file the attack script
+    wrote. The check is offered only once the session has STOPPED.
+    """
+    session = state.get("session", "?")
+    with st.expander("Lab validation"):
+        if state.get("phase") in (live.WAITING, live.LEARNING, live.MONITORING):
+            st.caption("Test attack, once monitoring has started - in another terminal:")
+            st.code("python -m src.scenario --run %s" % session, language="powershell")
+        compare = st.checkbox("Compare with the recorded answer", value=False, key="lab-compare",
+                              help="Opens the answer file the attack script wrote, only once "
+                                   "the session has stopped, to mark the verdict right or wrong.")
+        if compare:
+            if state.get("phase") == live.STOPPED:
+                draw_reveal(state)
+            else:
+                st.caption("Available once the session has stopped: the answer file is opened "
+                           "only after the analysis has finished.")
 
 
 def draw_report(state: dict) -> None:
@@ -636,7 +448,6 @@ def draw_report(state: dict) -> None:
     """
     r = state["incident"]
     start = r.get("capture_start_epoch")
-    st.divider()
     st.subheader("Incident report")
     st.download_button("Download the report (HTML, print to PDF from the browser)",
                        data=incident.render_html(r),
@@ -714,7 +525,6 @@ def draw_report(state: dict) -> None:
 def draw_brief(state: dict) -> None:
     report_part = state.get("report") or {}
     brief = report_part.get("brief")
-    st.divider()
     st.subheader("Incident brief")
     if not brief:
         if report_part.get("source") == "failed":
@@ -734,7 +544,7 @@ def draw_brief(state: dict) -> None:
         st.info(brief.get("uncertainty", ""))
     st.markdown("**What happened**")
     for entry in brief.get("timeline", []):
-        st.markdown("- **%s · `%s`** — %s  \n  <span style='color:#7f8c8d'>evidence: %s</span>"
+        st.markdown("- **%s · `%s`** — %s  \n  <span style='color:#8496B5'>evidence: %s</span>"
                     % (capture_clock_to_wall(state, entry.get("time")), entry.get("device"),
                        entry.get("what_happened"), ", ".join(entry.get("evidence_ids", []))),
                     unsafe_allow_html=True)
@@ -778,6 +588,7 @@ def render_page(live_dir=None, session: str | None = None,
     page was opened appears on it without anyone touching the page.
     """
     live_dir = Path(live_dir) if live_dir else live_dir_default()
+    theme.inject()
 
     with st.sidebar:
         st.header("Live session")
@@ -790,13 +601,8 @@ def render_page(live_dir=None, session: str | None = None,
             options = list_sessions(live_dir)
             if options and not follow:
                 chosen = st.selectbox("Session", options)
-        reveal = st.checkbox("Reveal the true answer (after stop)", value=False,
-                             help="Reads the answer file only once the session has "
-                                  "stopped, to mark the verdict right or wrong.")
         st.caption("Updates every %d s. Containment is recommended, never executed."
                    % refresh_seconds)
-
-    st.title("Live monitor")
 
     @st.fragment(run_every=refresh_seconds)
     def body():
@@ -809,16 +615,24 @@ def render_page(live_dir=None, session: str | None = None,
             return
         state = read_state(live_dir, name)
         if state is None:
-            st.info("Session `%s` has no readable state yet - the engine is starting." % name)
+            st.html(theme.top_bar(None))
+            st.html(theme.waiting_band("Starting session %s" % name,
+                                       "The engine is starting; its first state has not "
+                                       "been written yet."))
             return
-        draw_state(state, live_dir, reveal=reveal)
+        draw_state(state, live_dir)
 
     body()
 
 
+def page_config() -> None:
+    """The live page's own settings: wide, sidebar collapsed (it holds the page switch)."""
+    st.set_page_config(page_title="IoT Incident Attribution - live monitor",
+                       page_icon="📡", layout="wide", initial_sidebar_state="collapsed")
+
+
 def main() -> None:
-    st.set_page_config(page_title="IoT Incident Attribution - live",
-                       page_icon="📡", layout="wide")
+    page_config()
     render_page()
 
 

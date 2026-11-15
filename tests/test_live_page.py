@@ -1,5 +1,6 @@
 """
-Tests for dashboard/live_page.py and the dashboard changes of Step 17.
+Tests for dashboard/live_page.py and the dashboard changes of Step 17
+(rebuilt as the console in Step P1 of docs/POLISH_PLAN.md).
 
 The fixtures in tests/fixtures/live_states/ are real state.json files: one per
 phase, recorded by replaying pcap/segments/live_batch_01.pcapng through the
@@ -10,24 +11,28 @@ pcap/live/rehearsal_02.pcapng with esp32-03's packets removed 275 s after the
 trigger, as if its power had been pulled.
 
 Three kinds of test:
-- plain functions: the banner, the strike meter, the clock, session finding;
+- plain functions: the clock, session finding, the notes under the band (the
+  band, lanes and cards themselves are dashboard/theme.py, tested in
+  tests/test_theme.py since Step P1);
 - faithfulness: the objects the page rebuilds from state.json draw exactly
   what the engine's own objects draw (needs pcap/segments/, skips without);
-- rendering: Streamlit's AppTest draws every phase with zero exceptions.
+- rendering: Streamlit's AppTest draws every phase (and a stale engine) with
+  zero exceptions, and the band says what the theme says it should.
 """
 
 import copy
+import html
 import json
 import os
-import shutil
+import re
 import time
 from pathlib import Path
 
 import pytest
 from streamlit.testing.v1 import AppTest
 
-from dashboard import app, live_page
-from src import detect, live
+from dashboard import app, live_page, theme
+from src import live
 
 ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = ROOT / "tests" / "fixtures" / "live_states"
@@ -128,78 +133,32 @@ def test_the_suggested_session_name_is_unused(tmp_path):
 
 
 # --------------------------------------------------------------------------
-# The banner
+# The baseline countdown and the notes under the band
 # --------------------------------------------------------------------------
 
-def test_learning_says_do_not_attack_yet_with_the_time_it_ends():
+def test_the_baseline_progress_counts_minutes_and_says_when_it_ends():
     state = fixture("learning")
-    banner = live_page.headline(state)
-    assert banner["kind"] == "info"
-    assert "do not attack yet" in banner["title"]
     p = live_page.baseline_progress(state)
     assert p["total"] == 12 and 0 < p["done"] < 12
-    assert p["ends_at"] in banner["text"]
+    assert p["ends_at"] == theme.wall(theme.baseline_end_epoch(state))
+    assert p["ends_at"] in theme.band_content(state)["sub"]
 
 
-def test_monitoring_says_it_is_safe_to_attack():
-    banner = live_page.headline(fixture("monitoring"))
-    assert banner["kind"] == "success" and "safe to launch" in banner["title"]
-
-
-def test_an_incident_is_red_and_names_the_device_with_its_times():
-    state = fixture("incident")
-    banner = live_page.headline(state)
-    assert banner["kind"] == "error"
-    assert "esp32-02" in banner["title"]
-    assert live_page.wall(state["first_alert"]["raised_epoch"]) in banner["text"]
-    assert "100%" in banner["text"]
-
-
-def test_an_abstention_is_not_red_and_names_nobody():
-    state = fixture("incident")
-    state.update(abstained=True, named=None, shortlist=["esp32-02", "laptop-i3", "esp32-03"])
-    banner = live_page.headline(state)
-    assert banner["kind"] == "warning"
-    assert "not certain" in banner["title"] and "esp32-02, laptop-i3" in banner["text"]
-
-
-def test_after_stop_the_banner_says_final_verdict():
-    banner = live_page.headline(fixture("stopped"))
-    assert banner["title"].startswith("Final verdict")
-
-
-def test_a_quiet_session_that_stops_says_no_incident():
+def test_a_stale_engine_gets_a_note_and_a_stopped_session_says_where_it_was_saved():
     state = fixture("monitoring")
-    state["phase"] = live.STOPPED
-    assert "no incident" in live_page.headline(state)["title"]
+    state["updated_epoch"] = time.time() - 120
+    notes = live_page.notes_under_band(state)
+    assert notes[0][1] == "bad" and "has not updated" in notes[0][0]
+    stopped = dict(fixture("stopped"), saved_run="live_session_99")
+    saved = [text for text, _ in live_page.notes_under_band(stopped)]
+    assert any("data/live_session_99.parquet" in t for t in saved)
 
 
-# --------------------------------------------------------------------------
-# The strike meter
-# --------------------------------------------------------------------------
-
-def test_the_strike_meter_watches_and_never_accuses():
+def test_the_notes_escape_what_comes_from_data():
     state = fixture("monitoring")
-    state["devices"]["laptop-i3"]["strikes"] = 2
-    state["devices"]["laptop-i3"]["latest_score"] = 15.0
-    rows = {r["device"]: r for r in live_page.device_rows(state)}
-    laptop = rows["laptop-i3"]
-    assert laptop["status"] == "watching"
-    assert laptop["label"] == "watching: 2 of 3 minutes in a row over the line"
-    assert laptop["fraction"] == pytest.approx(2 / 3)
-    for row in rows.values():
-        assert "attack" not in row["label"].lower()
-
-
-def test_the_meter_in_each_phase(tmp_path):
-    learning = {r["device"]: r["status"] for r in live_page.device_rows(fixture("learning"))}
-    assert learning["esp32-01"] == "unseen"            # switched off in the real lab
-    assert learning["esp32-02"] == "learning"
-
-    incident = {r["device"]: r for r in live_page.device_rows(fixture("incident"))}
-    assert incident["esp32-02"]["status"] == "flagged"
-    assert incident["esp32-02"]["fraction"] == 1.0
-    assert incident["esp32-03"]["status"] == "normal"
+    state.update(session="<b>x</b>", updated_epoch=time.time() - 120)
+    text = live_page.notes_under_band(state)[0][0]
+    assert "<b>x</b>" not in text and "&lt;b&gt;x&lt;/b&gt;" in text
 
 
 # --------------------------------------------------------------------------
@@ -254,22 +213,6 @@ def test_the_replay_page_still_shows_capture_time_by_default():
     _, detection, result = live_page.objects_from_state(state)
     rows = app.ranking_rows(result, detection)
     assert rows[0]["onset"] == "00:13:00"
-
-
-def test_the_score_chart_has_the_line_and_caps_tall_spikes():
-    state = fixture("incident")
-    state["devices"]["laptop-i3"]["scores_by_window"]["14"] = 400.0
-    figure = live_page.score_figure(state)
-    lines = [s for s in figure.layout.shapes if s.y0 == s.y1]
-    assert any(s.y0 == pytest.approx(state["threshold"]) for s in lines)
-    assert max(max(t.y) for t in figure.data) <= live_page.SCORE_CHART_CAP
-    laptop = next(t for t in figure.data if t.name == "laptop-i3")
-    assert any("400.0" in h for h in laptop.hovertext)
-
-
-def test_the_score_chart_before_any_minute_is_scored():
-    figure = live_page.score_figure(fixture("learning"))
-    assert figure.layout.annotations[0].text == "no minute has been scored yet"
 
 
 needs_segments = pytest.mark.skipif(not (SEGMENTS / "live_batch_01.pcapng").exists(),
@@ -330,11 +273,30 @@ def render(live_dir, session=None):
     return at
 
 
+def html_parts(at):
+    """The st.html blocks the page drew (the top bar, band, lanes, cards)."""
+    return [e.proto.body for e in at.get("html")]
+
+
+def _words(fragment):
+    return html.unescape(re.sub(r"<[^>]+>", " ", fragment))
+
+
 def texts(at):
+    """Everything a person can read on the page, st.html included (tags removed),
+    with runs of white space folded to one space."""
     parts = []
-    for kind in ("error", "warning", "info", "success", "markdown", "caption", "title"):
+    for kind in ("error", "warning", "info", "success", "markdown", "caption", "title",
+                 "subheader"):
         parts += [str(e.value) for e in getattr(at, kind)]
-    return "\n".join(parts)
+    parts += [_words(body) for body in html_parts(at)]
+    return re.sub(r"\s+", " ", "\n".join(parts))
+
+
+def band_words(state):
+    """(headline, state word) that theme.band_content gives this state, as plain words."""
+    b = theme.band_content(state)
+    return re.sub(r"\s+", " ", _words(b["headline"])).strip(), b["state"]
 
 
 @pytest.mark.parametrize("name", PHASE_FILES)
@@ -344,8 +306,12 @@ def test_every_phase_renders_without_an_exception(tmp_path, name):
     at = render(tmp_path, session=state["session"])
     assert not at.exception, [e.value for e in at.exception]
     shown = texts(at)
-    assert live_page.headline(state)["title"] in shown
+    headline, word = band_words(state)
+    assert headline in shown and word in shown
     assert "has not updated" not in shown
+    # the CSS is on the page, and the lab check is tucked away at the bottom
+    assert any("--alert: #FF5D6C" in body for body in html_parts(at))
+    assert "Lab validation" in [e.label for e in at.expander]
 
 
 def test_the_incident_page_shows_the_verdict_network_suspects_and_brief(tmp_path):
@@ -353,7 +319,9 @@ def test_the_incident_page_shows_the_verdict_network_suspects_and_brief(tmp_path
     place(tmp_path, state)
     at = render(tmp_path, session=state["session"])
     shown = texts(at)
-    assert "Incident - the attack started on esp32-02" in shown
+    assert "The attack started on esp32-02" in shown
+    assert "How it was found" in shown and "Every device, minute by minute" in shown
+    assert "Attack origin" in shown
     assert "Suspects" in [s.value for s in at.subheader]
     # Step 19: the complete incident report replaces the short brief.
     assert "Incident report" in [s.value for s in at.subheader]
@@ -387,6 +355,14 @@ def test_a_silent_engine_is_pointed_out(tmp_path):
     at = render(tmp_path, session=state["session"])
     assert not at.exception
     assert "has not updated" in texts(at)
+    assert "Engine not updating" in texts(at)
+
+
+def test_a_session_whose_state_is_not_written_yet_says_it_is_starting(tmp_path):
+    (tmp_path / "brand_new").mkdir()
+    at = render(tmp_path, session="brand_new")
+    assert not at.exception
+    assert "Starting session brand_new" in texts(at)
 
 
 def test_with_no_session_at_all_the_page_shows_how_to_start_one(tmp_path):
@@ -407,7 +383,8 @@ def test_following_the_newest_session_picks_it_up(tmp_path):
     os.utime(tmp_path / "old_one" / live.STATE_FILE, (time.time() - 100, time.time() - 100))
     at = render(tmp_path)
     assert not at.exception
-    assert "safe to launch" in texts(at)
+    assert "Monitoring 3 devices" in texts(at)            # new_one, not old_one (learning)
+    assert "Learning normal behaviour" not in texts(at)
 
 
 def test_a_replay_session_is_labelled_as_a_replay(tmp_path):
@@ -415,16 +392,44 @@ def test_a_replay_session_is_labelled_as_a_replay(tmp_path):
     folder = place(tmp_path, state)
     (folder / live.REPLAY_SOURCE).mkdir()
     at = render(tmp_path, session=state["session"])
-    assert "replay of a recorded capture" in texts(at)
+    assert "Replay of a recorded capture" in texts(at)
 
 
-def test_the_whole_dashboard_opens_on_the_replay_page():
-    """Rung 3 of the fallback ladder: app.py with its new navigation."""
+def test_the_whole_dashboard_opens_on_the_past_sessions_page():
+    """Rung 3 of the fallback ladder: app.py opens on "Past sessions" (Step P1
+    renamed "Replay a saved capture"), in the console's theme."""
     at = AppTest.from_file(str(ROOT / "dashboard" / "app.py"), default_timeout=120)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
-    assert at.title[0].value == "IoT Incident Attribution"
+    assert at.title[0].value == "Past sessions"
     assert at.radio[0].value == "template"
+    bodies = html_parts(at)
+    assert any("--alert: #FF5D6C" in body for body in bodies)
+    assert any('<a class="on" href="./replay"' in body for body in bodies)
+
+
+def test_the_lab_check_lives_in_lab_validation_and_waits_for_stop(tmp_path, monkeypatch):
+    """"Compare with the recorded answer" sits in the collapsed Lab validation
+    section; ticking it during a running session does NOT open the answer file."""
+    def must_not_read(run_id):
+        raise AssertionError("the answer file was read during a running session")
+
+    monkeypatch.setattr(app, "load_answer_for_display", must_not_read)
+    state = fresh(fixture("incident"))
+    place(tmp_path, state)
+    at = render(tmp_path, session=state["session"])
+    box = next(c for c in at.checkbox if c.label == "Compare with the recorded answer")
+    box.check().run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert "Available once the session has stopped" in texts(at)
+
+
+def test_the_old_lab_wording_is_gone_from_the_live_page():
+    source = (ROOT / "dashboard" / "live_page.py").read_text(encoding="utf-8")
+    source += (ROOT / "dashboard" / "theme.py").read_text(encoding="utf-8")
+    for old in ("safe to launch", "do not attack yet", "Reveal the true answer",
+                "Replay a saved capture"):
+        assert old not in source, old
 
 
 def test_the_stale_model_name_is_gone_and_the_writers_are_named():

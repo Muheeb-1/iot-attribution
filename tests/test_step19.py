@@ -381,18 +381,21 @@ def test_pulling_the_power_gives_contained_90_s_after_the_last_beacon(tmp_path):
 # --------------------------------------------------------------------------
 
 def test_the_page_shows_the_report_and_the_contained_banner(tmp_path):
+    # Step P1: the banner and the strike meter are now dashboard/theme.py's
+    # status band and device lanes; same facts, the console's wording.
     from tests.test_live_page import fixture, fresh, place, render, texts
-    from dashboard import live_page
+    from dashboard import theme
     state = fresh(fixture("contained"))
-    banner = live_page.headline(state)
-    assert banner["kind"] == "success" and banner["title"].startswith("Contained at ")
-    rows = {r["device"]: r for r in live_page.device_rows(state)}
-    assert rows["esp32-03"]["status"] == "contained"
-    assert rows["esp32-03"]["label"].startswith("offline / contained since")
+    band = theme.band_content(state)
+    assert band["cls"] == "ok" and band["headline"].startswith("Contained at ")
+    rows = {r["device"]: r for r in theme.lane_rows(state)}
+    assert rows["esp32-03"]["badge"][:2] == ("off", "Offline, contained")
+    assert "contained since" in rows["esp32-03"]["badge"][2]
     place(tmp_path, state)
     at = render(tmp_path, session=state["session"])
     assert not at.exception, [e.value for e in at.exception]
     shown = texts(at)
+    assert "Contained at " in shown and "Offline, contained" in shown
     assert "Incident report" in [s.value for s in at.subheader]
     assert "8. What we are not sure about" in shown
     assert "connections to broker:4444 every ~30 s" in shown

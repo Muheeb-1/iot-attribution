@@ -76,16 +76,16 @@ Six terminals. Start them in this order. `NN` = your session number, the same ev
 
 | when | the page shows | you do | you say |
 |---|---|---|---|
-| C+0 | blue **"Learning what normal looks like - do not attack yet"**, minute 1 of 12, the clock time it finishes | nothing | (judges usually not here yet - slides or replay page) |
-| C+0 to C+12 | each device "learning its normal pattern"; packets and devices counting up | **do not attack** - an attack during learning is learned as normal | "For twelve minutes it learns what normal looks like for every device - including this laptop, which is deliberately noisy." |
-| C+12 (measured +12:09) | green **"Monitoring - safe to launch the attack"**; every device "normal (last minute scored x, the line is 4.0)" | in terminal 6: `python -m src.scenario --run live_session_NN --origin esp32-03` | "I am now sending one command that compromises one of these two boards. The system does not know which." |
+| C+0 | blue band **"Learning normal behaviour"**, "Minute 1 of 12. Monitoring starts at hh:mm:ss." | nothing | (judges usually not here yet - slides or replay page) |
+| C+0 to C+12 | each device lane says **"Learning"**; packets and devices counting up | **do not attack** - an attack during learning is learned as normal | "For twelve minutes it learns what normal looks like for every device - including this laptop, which is deliberately noisy." |
+| C+12 (measured +12:09) | green band **"Monitoring 3 devices"**, "Baseline established at hh:mm:ss. No device is over the line."; every lane says **"Normal"** | in terminal 6: `python -m src.scenario --run live_session_NN --origin esp32-03` | "I am now sending one command that compromises one of these two boards. The system does not know which." |
 | A+0:30 | nothing yet on the page | point at **terminal 2**: an "attacker received:" block - the board's MAC, IP, Wi-Fi name, readings | "That is the board leaking its data to an attacker, every 30 seconds. Small, quiet, regular - the way real malware calls home." |
-| A+1 to A+3 | the attacked board's meter: **"watching: 1 of 3 minutes in a row over the line"**, then **2 of 3**; the score chart climbs over the dashed line | nothing | "One odd minute is not enough to accuse a device - this laptop has odd minutes all the time. It needs three in a row." |
-| **A+3:16 to A+3:54** (measured) | red **"Incident - the attack started on esp32-03"**, confidence 100%, first abnormal at hh:mm, alert raised at hh:mm; the **incident report** appears below | scroll slowly through the report | "It names the board, and here is why: section 4 - it started talking to port 4444 every 30 seconds, 496 bytes, a destination it never used while learning." |
+| A+1 to A+3 | amber band **"Watching esp32-03"**, "1 of 3 minutes in a row over the line", then **2 of 3**; that board's lane shows red bars over the dashed line and says **"Watching 2 of 3"** | nothing | "One odd minute is not enough to accuse a device - this laptop has odd minutes all the time. It needs three in a row." |
+| **A+3:16 to A+3:54** (measured) | red band **"The attack started on esp32-03"** (state line "Incident"), confidence 100%, alert raised at hh:mm:ss; the right card turns into **"How it was found"**; the timeline and the **incident report** appear below | scroll slowly through the report | "It names the board, and here is why: section 4 - it started talking to port 4444 every 30 seconds, 496 bytes, a destination it never used while learning." |
 | right after the alert | report section 7, **"What to do"**: contain now - exact MAC, IP and port | **unplug the attacked board's USB power** (the system recommends; a person acts) | "The system never acts by itself. It tells the operator exactly what to do - I am doing it now by hand." |
-| about 90 s after the last beacon (measured 1 min 21 s to 2 min 14 s after the alert, incl. reaction time) | green **"Contained at hh:mm:ss - esp32-03 has stopped"**; the board reads "offline / contained since ..." | nothing | "It waited 90 seconds of silence from that board, and now it confirms from the traffic that the attack has stopped." |
+| about 90 s after the last beacon (measured 1 min 21 s to 2 min 14 s after the alert, incl. reaction time) | green band **"Contained at hh:mm:ss"**, "esp32-03 has made no connection to 192.168.0.200:4444 for 90 seconds"; the board's lane reads **"Offline, contained"** | nothing | "It waited 90 seconds of silence from that board, and now it confirms from the traffic that the attack has stopped." |
 | after CONTAINED | | **terminal 5: Ctrl+C** (stops the capture; the engine makes its final pass) | "Stopping the capture. Everything recorded is hashed - SHA-256 - so this is the evidence record." |
-| a few seconds later | **"Final verdict: Incident - the attack started on esp32-03"**; "Saved as data/live_session_NN.parquet" | in the sidebar tick **"Reveal the true answer (after stop)"** → **"Correct. The attack really did start on esp32-03."**; click the report download | "Only now does it open the answer file the attack script wrote. It was right." |
+| a few seconds later | band **"The attack started on esp32-03"** with state line "Session closed, contained", "Final verdict from the whole capture"; note "Saved as data/live_session_NN.parquet" | at the bottom of the page open **"Lab validation"** and tick **"Compare with the recorded answer"** → **"Correct. The attack really did start on esp32-03."**; click the report download | "Only now does it open the answer file the attack script wrote. It was right." |
 
 > **STOP THE CAPTURE BEFORE PLUGGING A CONTAINED BOARD BACK IN.**
 > In live_session_05 the board was plugged back in before the capture was stopped. It
@@ -109,7 +109,7 @@ yesterday". Do not try to fix code in front of the judges.
 | symptom | do this |
 |---|---|
 | terminal 5 says **"This terminal is NOT running as Administrator"** | it refused before starting (it would otherwise hang silently). Open an Administrator PowerShell and re-run the same command. Or use Wireshark's own window: Capture → Options → wired adapter (Ethernet) → Output tab → File `pcap\live\live_session_NN\ring.pcapng`, tick *Create a new file automatically* → *after 10 seconds* → Start. |
-| page stays on **"Waiting for the capture to start"** | check terminal 5 is writing files, and that terminals 4 and 5 use **exactly** the same session name. |
+| page stays on **"Waiting for the capture"** (or "Waiting for a session") | check terminal 5 is writing files, and that terminals 4 and 5 use **exactly** the same session name. |
 | page shows **"The engine has not updated this page for ..."** | terminal 4 has stopped. Run the same `python -m src.live --session live_session_NN` again: it joins the running capture and re-reads every file. Nothing is lost. |
 | **scenario.py refuses: answer file exists** | you typed a name that was already used. Re-type it with this session's name. Use `--force` **only** if you are sure the first trigger never went out. |
 | **no "attacker received:" in terminal 2 within 60 s** of the attack | look at terminal 1: is the board connected, did the `ctrl/<board>` message arrive? If the trigger never reached the board, re-send with `--force`. If the board is not connected, **do not plug it in now** (a board joining mid-session is untested) - go to rung 2. |
@@ -136,14 +136,14 @@ takes about 36 s, and the whole session about 1.5 minutes. Verified 13 Nov: esp3
 100%, the same alert and CONTAINED second as the real run, phases LEARNING → MONITORING →
 INCIDENT → CONTAINED → STOPPED. Two things to know:
 - the clock on the page shows the **recording's** times (19:17 to 19:35 on 13 Nov) - say so;
-- the reveal tick says "No answer file saved for this session", because the answer belongs to
+- "Compare with the recorded answer" (in Lab validation) says "No answer file saved for this session", because the answer belongs to
   live_session_07. Say: "this is the recording of live_session_07; the board attacked was esp32-03".
 
 A second replay needs a new name (`replay_demo_02`), or the same name with `--force`.
 
 ### Rung 3 - the replay dashboard (no live parts at all)
 
-Sidebar → **"Replay a saved capture"** → pick **live_session_07** (or live_session_03, or any `lab_batch_NN`).
+Top bar or sidebar → **"Past sessions"** (the page the dashboard opens on) → pick **live_session_07** (or live_session_03, or any `lab_batch_NN`).
 The full analysis runs on the saved traffic. Turn on the reveal tick → "Correct". Open the
 incident report in its expander. (Do not pick live_session_06: it was aborted and has no attack.)
 
@@ -212,7 +212,7 @@ hotspot so all traffic passes through it, and stage an attack that spreads betwe
   rule). Caveat: in 2 of the 10 sessions with the laptop, the laptop had too little clean
   baseline to be judged.
 - *What if the attack starts during learning?* It is learned as normal and not detected - a
-  stated limit. That is why the page says "do not attack yet".
+  stated limit. That is why the attack waits for the green "Monitoring" band.
 - *What if a session goes wrong?* It is kept and labelled, never deleted: session 02 (laptop
   loop off) and 05 (board back on early) are scored with notes; 06 (aborted, no attack) is shown
   as aborted and left out.

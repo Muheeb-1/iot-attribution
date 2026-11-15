@@ -1,12 +1,18 @@
 """
-THE DASHBOARD - one page a human actually looks at.
+THE DASHBOARD - the entry point, and the "Past sessions" page.
+
+`streamlit run dashboard/app.py` opens two pages (top bar or sidebar):
+"Live monitor" (dashboard/live_page.py) and "Past sessions" (this file's
+replay_page, the default - the last rung of the fallback ladder, which needs
+nothing but the saved runs in data/). Both share dashboard/theme.py: the dark
+console colours and the Plotly template (Step P1 of docs/POLISH_PLAN.md).
 
 Streamlit only. No Node, no React, no build step: this is a Python file, and
 `streamlit run` is the whole toolchain. That matters for a project that has to
 be demonstrated on someone else's machine.
 
-WHAT IS ON THE PAGE
--------------------
+WHAT IS ON THE PAST SESSIONS PAGE
+---------------------------------
   1. The verdict      which device started it, and how sure we are - or an
                       honest "cannot tell, here are three" when it abstains.
   2. The network      every device as a dot, every link the analysis drew as
@@ -61,15 +67,16 @@ if str(ROOT) not in sys.path:
 import plotly.graph_objects as go
 import streamlit as st
 
+from dashboard import theme
 from src import attribute, detect, features, incident, report, runs
 
-# Colours, chosen to stay legible on Streamlit's light and dark themes.
-COLOUR_ORIGIN = "#d62728"      # the named origin - red
-COLOUR_SHORTLIST = "#ff7f0e"   # on the shortlist - orange
-COLOUR_FLAGGED = "#ffbb44"     # went abnormal, not a leading suspect - amber
-COLOUR_CLEAN = "#b8c4cc"       # never flagged - grey
-COLOUR_PATH = "#d62728"        # attack path edges
-COLOUR_EDGE = "#95a5a6"        # every other edge
+# Colours, from the console theme (dashboard/theme.py) so both pages match.
+COLOUR_ORIGIN = theme.ALERT     # the named origin - red
+COLOUR_SHORTLIST = "#FF9F43"    # on the shortlist - orange
+COLOUR_FLAGGED = theme.WATCH    # went abnormal, not a leading suspect - amber
+COLOUR_CLEAN = theme.BAR        # never flagged - grey
+COLOUR_PATH = theme.ALERT       # attack path edges
+COLOUR_EDGE = theme.MUTED       # every other edge
 
 EDGE_STYLE = {
     "direct": "solid",
@@ -194,7 +201,7 @@ def network_figure(run: runs.Run, detection: detect.Detection,
             mode="markers+text",
             marker=dict(size=30 if role == "origin" else 22,
                         color=ROLE_COLOUR[role],
-                        line=dict(width=2, color="white")),
+                        line=dict(width=2, color=theme.TEXT)),
             text=members,
             textposition="top center",
             textfont=dict(size=11),
@@ -237,7 +244,7 @@ def timeline_figure(run: runs.Run, detection: detect.Detection,
             y=members,
             mode="markers",
             marker=dict(size=16, color=ROLE_COLOUR[role],
-                        line=dict(width=2, color="white")),
+                        line=dict(width=2, color=theme.TEXT)),
             name=ROLE_LABEL[role],
             hovertext=["%s went abnormal at %s"
                        % (d, report.clock(detection.onsets[d])) for d in members],
@@ -246,7 +253,7 @@ def timeline_figure(run: runs.Run, detection: detect.Detection,
 
     figure.add_vline(
         x=run.baseline_seconds / 3600.0,
-        line=dict(color="#7f8c8d", width=2, dash="dash"),
+        line=dict(color=theme.SOFT, width=2, dash="dash"),
         annotation_text="baseline ends",
         annotation_position="top",
     )
@@ -393,33 +400,41 @@ def live_monitor_page() -> None:
     """
     The live page lives in dashboard/live_page.py. It is imported here, when
     the page is opened, not at the top of the file: if anything in it were
-    broken, this replay page - the last rung of the fallback ladder - must
-    still open.
+    broken, the Past sessions page - the last rung of the fallback ladder -
+    must still open.
     """
     try:
         from dashboard import live_page
-    except Exception as exc:                 # keep the replay page alive whatever happens
+    except Exception as exc:                 # keep the Past sessions page alive whatever happens
+        st.set_page_config(page_title="IoT Incident Attribution", layout="wide")
         st.error("The live page could not be loaded: %s" % exc)
-        st.info("Use the replay page, or run  streamlit run dashboard/live_page.py")
+        st.info("Use the Past sessions page, or run  streamlit run dashboard/live_page.py")
         return
+    live_page.page_config()
     live_page.render_page()
 
 
 def main() -> None:
-    st.set_page_config(page_title="IoT Incident Attribution",
-                       page_icon="🔎", layout="wide")
+    # No set_page_config here: Streamlit allows one per run, and each page sets
+    # its own (the live page starts with the sidebar collapsed; this page keeps
+    # it open, because its run picker is there).
     pages = st.navigation([
-        st.Page(replay_page, title="Replay a saved capture", icon="🔎",
-                url_path="replay", default=True),
         st.Page(live_monitor_page, title="Live monitor", icon="📡", url_path="live"),
+        st.Page(replay_page, title="Past sessions", icon="🔎",
+                url_path="replay", default=True),
     ])
     pages.run()
 
 
 def replay_page() -> None:
-    st.title("IoT Incident Attribution")
+    st.set_page_config(page_title="IoT Incident Attribution - past sessions",
+                       page_icon="🔎", layout="wide", initial_sidebar_state="expanded")
+    theme.inject()
+    st.html(theme.top_bar(None, page="past"))
+    st.title("Past sessions")
     st.caption("Which device did the attack start from - and what should be "
-               "done about it?")
+               "done about it? Pick a saved capture in the sidebar; the whole "
+               "analysis runs again on its traffic.")
 
     # Runs that a fresh conversion has replaced are hidden here (they were
     # saved under the pre-Step-18 rules and this page analyses with today's);
@@ -534,8 +549,8 @@ def replay_page() -> None:
                    "drew between them; the attack path is picked out in red. "
                    "Solid = a real connection, dashed = the same new outside "
                    "address, dotted = a shared middleman.")
-        st.plotly_chart(network_figure(run, detection, result),
-                        use_container_width=True)
+        st.plotly_chart(theme.styled(network_figure(run, detection, result)),
+                        use_container_width=True, theme=None)
 
     with ranking:
         st.subheader("Suspects")
@@ -560,8 +575,8 @@ def replay_page() -> None:
     st.subheader("When each device went abnormal")
     st.caption("Everything to the left of the dashed line is the quiet period "
                "used to learn what normal looks like.")
-    st.plotly_chart(timeline_figure(run, detection, result),
-                    use_container_width=True)
+    st.plotly_chart(theme.styled(timeline_figure(run, detection, result)),
+                    use_container_width=True, theme=None)
 
     st.divider()
 
@@ -602,7 +617,7 @@ def replay_page() -> None:
 
     st.markdown("**What happened**")
     for entry in brief.timeline:
-        st.markdown("- **%s · `%s`** — %s  \n  <span style='color:#7f8c8d'>"
+        st.markdown("- **%s · `%s`** — %s  \n  <span style='color:#8496B5'>"
                     "evidence: %s</span>"
                     % (entry.time, entry.device, entry.what_happened,
                        ", ".join(entry.evidence_ids)),

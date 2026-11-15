@@ -1,0 +1,17 @@
+# Streamlit settings for the dashboard (Step P1 of docs/POLISH_PLAN.md).
+# Dark base colours, the same as dashboard/theme.py, so Streamlit's own widgets
+# (sidebar, buttons, expanders, tables) match the console. The header bar is
+# hidden by the CSS in dashboard/theme.py; "minimal" also removes the Deploy
+# button and the developer menu items from the toolbar.
+
+[theme]
+base = "dark"
+primaryColor = "#6FA8FF"
+backgroundColor = "#0E1524"
+secondaryBackgroundColor = "#162033"
+textColor = "#E8EEF9"
+font = "sans serif"
+
+[client]
+toolbarMode = "minimal"
+showSidebarNavigation = true
