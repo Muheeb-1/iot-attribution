@@ -61,7 +61,7 @@ Six terminals. Start them in this order. `NN` = your session number, the same ev
 |---|---|---|---|
 | 1 | **Administrator** | `Stop-Service mosquitto` then `& 'C:\Program Files\mosquitto\mosquitto.exe' -c lab\mosquitto_lab.conf -v` | the broker log; esp32-02, esp32-03 connected; laptop-i3 connecting/disconnecting every ~2 s |
 | 2 | ordinary | `python -m src.listener` | "listening for beacons on 0.0.0.0:4444" - this is "the attacker" |
-| 3 | ordinary | `streamlit run dashboard/app.py` | browser opens; click **"Live monitor"** in the sidebar; it says "Waiting for a session" with the next free name |
+| 3 | ordinary | `streamlit run dashboard/app.py` | browser opens on the **Live monitor**; it says "Waiting for a session" with the next free name |
 | 4 | ordinary | `python -m src.live --session live_session_NN` | the engine: one line per closed minute |
 | 5 | **Administrator** | `python -m src.live_capture --session live_session_NN` | the capture: "recording on ... (a new file every 10 s)", then a "recording N s, N files" line |
 | 6 | ordinary | (keep it for the attack command) | |
@@ -143,8 +143,8 @@ A second replay needs a new name (`replay_demo_02`), or the same name with `--fo
 
 ### Rung 3 - the replay dashboard (no live parts at all)
 
-Top bar or sidebar → **"Past sessions"** (the page the dashboard opens on) → pick **live_session_07** (or live_session_03, or any `lab_batch_NN`).
-The full analysis runs on the saved traffic. Turn on the reveal tick → "Correct". Open the
+Top bar → **"Past sessions"**. It opens on the newest live session (live_session_07); or pick live_session_03, or any `lab_batch_NN`, in the sidebar.
+The full analysis runs on the saved traffic. At the bottom, open **"Lab validation"** and tick **"Compare with the recorded answer"** → "Correct". Open the
 incident report in its expander. (Do not pick live_session_06: it was aborted and has no attack.)
 
 ### Rung 4 - the saved report (no Python at all)

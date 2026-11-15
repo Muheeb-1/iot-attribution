@@ -1,10 +1,11 @@
 """
 THE DASHBOARD - the entry point, and the "Past sessions" page.
 
-`streamlit run dashboard/app.py` opens two pages (top bar or sidebar):
-"Live monitor" (dashboard/live_page.py) and "Past sessions" (this file's
-replay_page, the default - the last rung of the fallback ladder, which needs
-nothing but the saved runs in data/). Both share dashboard/theme.py: the dark
+`streamlit run dashboard/app.py` opens two pages, switched in the top bar:
+"Live monitor" (dashboard/live_page.py, the page it opens on) and "Past
+sessions" (this file's replay_page - the last rung of the fallback ladder,
+which needs nothing but the saved runs in data/; it opens on the newest real
+live session). Both share dashboard/theme.py: the dark
 console colours and the Plotly template (Step P1 of docs/POLISH_PLAN.md).
 
 Streamlit only. No Node, no React, no build step: this is a Python file, and
@@ -39,9 +40,9 @@ page is computed live from the traffic.
 
 A NOTE ON THE ANSWER SHEET
 --------------------------
-There is a "reveal the answer" switch, off by default. It reads
-groundtruth/ purely to draw a tick or a cross next to the verdict, and it
-runs AFTER the analysis has completely finished. Nothing it reads can reach
+At the bottom, in a collapsed "Lab validation" section, a box "Compare with
+the recorded answer", off by default. It reads groundtruth/ purely to say
+right or wrong, and it runs AFTER the analysis has completely finished. Nothing it reads can reach
 the pipeline. It is here because the first question anyone asks during a
 demonstration is "was it right?", and the honest way to answer that is to
 show the answer being checked rather than asserted.
@@ -55,6 +56,7 @@ from __future__ import annotations
 
 import json
 import math
+import re
 import sys
 from pathlib import Path
 
@@ -71,9 +73,11 @@ from dashboard import theme
 from src import attribute, detect, features, incident, report, runs
 
 # Colours, from the console theme (dashboard/theme.py) so both pages match.
+# Four roles, four hues that cannot be confused (Step P1b: the old orange
+# "shortlist" and amber "went abnormal" looked the same on the dark page).
 COLOUR_ORIGIN = theme.ALERT     # the named origin - red
-COLOUR_SHORTLIST = "#FF9F43"    # on the shortlist - orange
-COLOUR_FLAGGED = theme.WATCH    # went abnormal, not a leading suspect - amber
+COLOUR_SHORTLIST = theme.WATCH  # on the shortlist - amber
+COLOUR_FLAGGED = theme.FLAGGED  # went abnormal, not a leading suspect - violet
 COLOUR_CLEAN = theme.BAR        # never flagged - grey
 COLOUR_PATH = theme.ALERT       # attack path edges
 COLOUR_EDGE = theme.MUTED       # every other edge
@@ -259,16 +263,55 @@ def timeline_figure(run: runs.Run, detection: detect.Detection,
     )
 
     figure.update_layout(
-        height=max(240, 42 * len(ordered) + 90),
-        margin=dict(l=10, r=10, t=30, b=10),
+        height=max(280, 42 * len(ordered) + 150),
+        # The left margin fits the longest device name, and the bottom one
+        # the hour ticks, the axis title and the legend (Step P1b: names, ticks
+        # and title were cut off or overlapping); automargin lets Plotly widen
+        # either further if a font is wider than expected.
+        margin=dict(l=name_margin(ordered), r=10, t=30, b=90),
         xaxis=dict(title="hours into the capture",
-                   range=[0, run.capture_seconds / 3600.0]),
-        yaxis=dict(categoryorder="array", categoryarray=list(reversed(ordered))),
-        legend=dict(orientation="h", yanchor="bottom", y=-0.3, x=0),
+                   range=[0, run.capture_seconds / 3600.0], automargin=True),
+        yaxis=dict(categoryorder="array", categoryarray=list(reversed(ordered)),
+                   automargin=True),
+        showlegend=True,
+        legend=dict(orientation="h", yanchor="top", y=-0.32, x=0),
         plot_bgcolor="rgba(0,0,0,0)",
         paper_bgcolor="rgba(0,0,0,0)",
     )
     return figure
+
+
+def name_margin(names, px_per_char: float = 8.5, padding: int = 24) -> int:
+    """Left margin, in pixels, wide enough for the longest name at 13 px."""
+    longest = max((len(str(n)) for n in names), default=0)
+    return int(round(longest * px_per_char + padding))
+
+
+def default_run(available) -> str | None:
+    """
+    The run the Past sessions page opens on: the newest real live session
+    (live_session_NN, highest number, leaving out aborted sessions that have
+    no attack), else the newest real lab capture, else the first that is not
+    simulated. Never a simulated run_* while a real capture exists (Step P1b).
+    """
+    available = list(available)
+    if not available:
+        return None
+    try:
+        from src.evaluate import ABORTED_SESSIONS
+    except Exception:                      # the page must open whatever happens
+        ABORTED_SESSIONS = {}
+
+    def number(run_id):
+        digits = re.findall(r"\d+", run_id)
+        return int(digits[-1]) if digits else -1
+
+    for prefix in ("live_session_", "lab_batch_", "lab_", "rehearsal_"):
+        real = [r for r in available if r.startswith(prefix) and r not in ABORTED_SESSIONS]
+        if real:
+            return max(real, key=number)
+    not_simulated = [r for r in available if not r.startswith("run_")]
+    return not_simulated[0] if not_simulated else available[0]
 
 
 def ranking_rows(result: attribute.Attribution, detection: detect.Detection,
@@ -418,10 +461,12 @@ def main() -> None:
     # No set_page_config here: Streamlit allows one per run, and each page sets
     # its own (the live page starts with the sidebar collapsed; this page keeps
     # it open, because its run picker is there).
+    # The app opens on the Live monitor (Step P1b); Past sessions is one click
+    # away in the top bar, and is still the last rung of the fallback ladder.
     pages = st.navigation([
-        st.Page(live_monitor_page, title="Live monitor", icon="📡", url_path="live"),
-        st.Page(replay_page, title="Past sessions", icon="🔎",
-                url_path="replay", default=True),
+        st.Page(live_monitor_page, title="Live monitor", icon="📡", url_path="live",
+                default=True),
+        st.Page(replay_page, title="Past sessions", icon="🔎", url_path="replay"),
     ])
     pages.run()
 
@@ -451,8 +496,7 @@ def replay_page() -> None:
     with st.sidebar:
         st.header("Capture")
         run_id = st.selectbox("Which incident?", available,
-                              index=available.index("run_000")
-                              if "run_000" in available else 0,
+                              index=available.index(default_run(available)),
                               format_func=lambda r: run_label(r, came_from))
 
         st.header("Who writes the brief")
@@ -482,15 +526,6 @@ def replay_page() -> None:
                      help="Ask the model again. The template never changes."):
             st.session_state["nonce"] = st.session_state.get("nonce", 0) + 1
 
-        st.header("Demonstration")
-        reveal = st.checkbox(
-            "Reveal the true answer", value=False,
-            help="Reads the answer sheet purely to mark the verdict right or "
-                 "wrong. It runs after the analysis and cannot influence it.",
-        )
-
-        st.divider()
-        st.caption("Streamlit only - no Node, no React, no build step.")
 
     with st.spinner("Running the analysis over the capture..."):
         run, detection, result, evidence = analyse(run_id)
@@ -516,27 +551,6 @@ def replay_page() -> None:
         b.metric("Flagged", "%d of %d" % (len(detection.onsets),
                                           len(run.device_names)))
         c.metric("Connections", "{:,}".format(len(run.connections)))
-
-    if reveal:
-        answer = load_answer_for_display(run_id)
-        if answer is None:
-            st.info("No answer file saved for this capture.")
-        else:
-            origin = answer["origin"]
-            rank = result.ranking.index(origin) + 1 if origin in result.ranking else None
-            if rank == 1:
-                st.success("Correct. The attack really did start on `%s`. "
-                           "True chain: %s" % (origin, " → ".join(answer["chain"])))
-            elif rank is not None and rank <= 3:
-                st.warning("Not first, but on the shortlist: `%s` was ranked "
-                           "%d. True chain: %s"
-                           % (origin, rank, " → ".join(answer["chain"])))
-            elif rank is not None:
-                st.error("Wrong. `%s` was the real origin, ranked %d. "
-                         "True chain: %s" % (origin, rank, " → ".join(answer["chain"])))
-            else:
-                st.error("`%s` was the real origin, and the detector never "
-                         "flagged it, so it could not be ranked at all." % origin)
 
     st.divider()
 
@@ -665,6 +679,51 @@ def replay_page() -> None:
         st.markdown("**Connections cited as evidence**")
         st.dataframe(evidence["connections"], use_container_width=True,
                      hide_index=True)
+
+    draw_lab_validation(run_id, result)
+
+
+def answer_verdict(answer, result: attribute.Attribution):
+    """
+    (kind, sentence) for the lab check: the recorded answer against the
+    finished analysis. kind is success / warning / error / info. Pure, so it
+    is tested directly.
+    """
+    if answer is None:
+        return "info", "No answer file saved for this capture."
+    origin = answer["origin"]
+    chain = " → ".join(answer.get("chain") or [origin])
+    rank = result.ranking.index(origin) + 1 if origin in result.ranking else None
+    if rank == 1 and not result.abstained:
+        return "success", "Correct. The attack really did start on `%s`. True chain: %s" % (
+            origin, chain)
+    if rank is not None and rank <= 3:
+        return "warning", ("Not named first, but on the shortlist: `%s` was ranked %d. "
+                           "True chain: %s" % (origin, rank, chain))
+    if rank is not None:
+        return "error", "Wrong. `%s` was the real origin, ranked %d. True chain: %s" % (
+            origin, rank, chain)
+    return "error", ("`%s` was the real origin, and the detector never flagged it, so it "
+                     "could not be ranked at all." % origin)
+
+
+def draw_lab_validation(run_id: str, result: attribute.Attribution) -> None:
+    """
+    The lab-only check, collapsed at the bottom - worded and behaving like the
+    live page's (Step P1b; it used to be "Reveal the true answer" in the
+    sidebar). It is drawn after the whole analysis has run, and the answer
+    file is opened only when the box is ticked; nothing it reads goes back
+    into the analysis.
+    """
+    with st.expander("Lab validation"):
+        compare = st.checkbox("Compare with the recorded answer", value=False,
+                              key="past-compare",
+                              help="Opens the answer file the attack script wrote, only to "
+                                   "mark the finished verdict right or wrong.")
+        if compare:
+            kind, sentence = answer_verdict(load_answer_for_display(run_id), result)
+            {"success": st.success, "warning": st.warning, "error": st.error,
+             "info": st.info}[kind](sentence)
 
 
 if __name__ == "__main__":

@@ -79,6 +79,7 @@ OK = "#35C7A0"
 LEARN = "#6FA8FF"
 WATCH = "#F2B544"
 ALERT = "#FF5D6C"
+FLAGGED = "#B79CFF"      # Past sessions charts: "went abnormal", not a suspect (P1b)
 BAR = "#5C6F92"
 BAR_DIM = "#33435F"
 
@@ -109,6 +110,9 @@ CSS = """
 .stMarkdown, [data-testid="stCaptionContainer"] { font-family: var(--body); }
 .stApp h1, .stApp h2, .stApp h3, .stApp h4 { font-family: var(--display); font-weight: 600; letter-spacing: 0.01em; }
 .stApp code, .stApp pre { font-family: var(--mono); }
+/* inline code (`esp32-03`, file paths): quiet, not Streamlit's green (P1b) */
+.stApp :not(pre) > code { color: var(--soft) !important; background: var(--raised) !important;
+                          border-radius: 4px; padding: 0.1em 0.35em; }
 header[data-testid="stHeader"] { background: transparent; height: 0; }
 [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none; }
 [data-testid="stMainBlockContainer"], .block-container { max-width: 100%; padding: 0.75rem 1.5rem 3rem; }
@@ -402,8 +406,13 @@ def device_badge(state: dict, name: str) -> tuple:
 
 def top_bar(state: dict | None, page: str = "live", replaying: bool = False,
             stale: bool = False) -> str:
-    """Brand, the two pages, and (on the live page) capture status, session and clock."""
-    nav = ('<nav><a class="%s" href="./live" target="_self">Live monitor</a>'
+    """
+    Brand, the two pages, and (on the live page) capture status, session and
+    clock. The top bar is the only page switch (the sidebar's is hidden,
+    Step P1b). The Live monitor is the app's default page, which Streamlit
+    serves at "/" - a link to "/live" would raise "Page not found".
+    """
+    nav = ('<nav><a class="%s" href="./" target="_self">Live monitor</a>'
            '<a class="%s" href="./replay" target="_self">Past sessions</a></nav>'
            % ("on" if page == "live" else "", "on" if page == "past" else ""))
     right = ""

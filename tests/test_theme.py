@@ -314,6 +314,8 @@ def test_the_top_bar_shows_capture_status_session_and_clock():
     assert "Capture stopped" in plain(theme.top_bar(fixture("stopped")))
     past = theme.top_bar(None, page="past")
     assert '<a class="on" href="./replay"' in past and "Session" not in plain(past)
+    # the Live monitor is the default page, served at "/" (a link to /live is "Page not found")
+    assert 'href="./"' in past and 'href="./live"' not in past
 
 
 # --------------------------------------------------------------------------

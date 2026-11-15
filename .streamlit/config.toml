@@ -14,4 +14,7 @@ font = "sans serif"
 
 [client]
 toolbarMode = "minimal"
-showSidebarNavigation = true
+# The page switch is the top bar (dashboard/theme.py top_bar); checked in a
+# real browser on 15 Nov 2026 that its two links work alone (Step P1b), so the
+# sidebar does not repeat it.
+showSidebarNavigation = false

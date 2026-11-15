@@ -395,17 +395,33 @@ def test_a_replay_session_is_labelled_as_a_replay(tmp_path):
     assert "Replay of a recorded capture" in texts(at)
 
 
-def test_the_whole_dashboard_opens_on_the_past_sessions_page():
-    """Rung 3 of the fallback ladder: app.py opens on "Past sessions" (Step P1
-    renamed "Replay a saved capture"), in the console's theme."""
+def test_the_whole_dashboard_opens_on_the_live_monitor(tmp_path, monkeypatch):
+    """app.py opens on the Live monitor (Step P1b; it opened on Past sessions
+    in P1), in the console's theme. With no session it shows how to start one."""
+    monkeypatch.setenv("IOT_LIVE_DIR", str(tmp_path / "empty"))
     at = AppTest.from_file(str(ROOT / "dashboard" / "app.py"), default_timeout=120)
+    at.run()
+    assert not at.exception, [e.value for e in at.exception]
+    assert not [t.value for t in at.title]                 # Past sessions has a title; live has none
+    bodies = html_parts(at)
+    assert any("--alert: #FF5D6C" in body for body in bodies)
+    assert any('<a class="on" href="./"' in body for body in bodies)
+    assert "Waiting for a session" in texts(at)
+
+
+def test_the_past_sessions_page_still_opens_on_its_own():
+    """Rung 3 of the fallback ladder: the Past sessions page, in the theme."""
+    at = AppTest.from_function(_past_page, default_timeout=180)
     at.run()
     assert not at.exception, [e.value for e in at.exception]
     assert at.title[0].value == "Past sessions"
     assert at.radio[0].value == "template"
-    bodies = html_parts(at)
-    assert any("--alert: #FF5D6C" in body for body in bodies)
-    assert any('<a class="on" href="./replay"' in body for body in bodies)
+    assert any('<a class="on" href="./replay"' in body for body in html_parts(at))
+
+
+def _past_page():
+    from dashboard import app as dashboard_app
+    dashboard_app.replay_page()
 
 
 def test_the_lab_check_lives_in_lab_validation_and_waits_for_stop(tmp_path, monkeypatch):

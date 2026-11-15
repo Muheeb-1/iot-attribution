@@ -92,6 +92,32 @@ Design decisions that are easy to miss:
   screenshots instead - do not guess what it looks like. Save what you get in
   `docs/screenshots/`.
 
+### P1b - fixes found when P1 was checked by eye (15 Nov 2026)
+1. The app opens on **Live monitor** (its `st.Page` has `default=True`). Past sessions
+   opens on the newest real live session (`live_session_NN`, highest number, aborted
+   sessions left out), else the newest real lab capture - never a simulated `run_*` by
+   default (`app.default_run`).
+2. Past sessions, "When each device went abnormal": the left margin fits the longest
+   device name (`app.name_margin`, plus Plotly automargin); the bottom margin fits the
+   hour ticks, the axis title and the legend, which also overlapped.
+3. Past sessions chart colours: origin = `theme.ALERT`, on the shortlist = `theme.WATCH`,
+   went abnormal = `#B79CFF` (`theme.FLAGGED`), nothing unusual = `#5C6F92`. The old
+   orange shortlist and amber "went abnormal" looked the same.
+4. Past sessions: "Reveal the true answer" left the sidebar for a collapsed "Lab
+   validation" section at the bottom, "Compare with the recorded answer", like the live
+   page (`app.answer_verdict` is the pure part).
+5. The sidebar caption "Streamlit only - no Node, no React, no build step." is gone.
+6. The page menu showed twice. Checked in a real browser (Edge driven over its DevTools
+   protocol) that the top-bar links work alone, then set `showSidebarNavigation = false`.
+   Found while checking: the Live monitor link pointed at `/live`, but the default page is
+   served at `/`, so it raised Streamlit's "Page not found" dialog - the link is now `./`.
+   (Typing `/replay` into a freshly started server can still flash that dialog once,
+   with or without the sidebar menu - a Streamlit 1.40 quirk; opening `/` and clicking
+   the top bar never does.)
+7. Inline code (`esp32-03`, file paths) is `var(--soft)` on `var(--raised)` on both
+   pages, not Streamlit's green.
+8. This section. Tests: `tests/test_p1b.py`.
+
 ### P2 - the alert experience
 - While the phase is INCIDENT and not acknowledged: band ring animation, an **Acknowledge**
   button in the band, and a short repeating tone.
