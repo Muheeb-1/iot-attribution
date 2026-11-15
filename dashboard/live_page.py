@@ -48,6 +48,23 @@ a row (docs/LIVE_PLAN.md section 7). So a device part-way there is shown as
 "Watching 2 of 3" in amber, never in the alert colour; only the incident,
 which appears after the third minute, is red.
 
+THE ALERT (Step P2)
+-------------------
+While an incident is not acknowledged the band rings, carries an
+Acknowledge button, and a short quiet tone repeats (two 880 Hz pips every
+1.6 s, made in code - alert_tone_wav). The sidebar's "Alert sound" switch
+turns the tone off; the visual alert never depends on it. A browser may
+refuse to play sound until someone has clicked on the page, which is why the
+demo script says to flick that switch once after opening the page.
+
+Acknowledge is an operator action, written by the page as
+pcap/live/<session>/ack.json ({"acknowledged_epoch": <this laptop's clock>}).
+The engine reads it only to put the time in state.json and the report
+(incident.acknowledgement). Until the engine's next cycle the page places
+the click on the session's clock itself, with the same function, so the
+ring and the tone stop at once. The band then shows "Acknowledged HH:MM:SS"
+and its three figures become to detect / to acknowledge / to contain.
+
 THE ANSWER SHEET
 ----------------
 "Compare with the recorded answer", in the collapsed Lab validation section,
@@ -62,11 +79,16 @@ RUN IT
 
 from __future__ import annotations
 
+import io
 import json
+import math
 import os
 import re
+import struct
 import sys
 import time
+import wave
+from functools import lru_cache
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -298,6 +320,101 @@ def start_commands(session: str) -> str:
             % (session, session))
 
 
+# --------------------------------------------------------------------------
+# The alert: acknowledgement and tone (Step P2)
+# --------------------------------------------------------------------------
+
+def ack_path(live_dir: Path, session: str) -> Path:
+    return Path(live_dir) / session / live.ACK_FILE
+
+
+def read_ack_epoch(live_dir: Path, session: str):
+    """The operator's clock time in ack.json, or None."""
+    try:
+        data = json.loads(ack_path(live_dir, session).read_text(encoding="utf-8"))
+        return float(data["acknowledged_epoch"])
+    except (OSError, ValueError, KeyError, TypeError):
+        return None
+
+
+def write_ack(live_dir: Path, session: str, now: float | None = None) -> float:
+    """
+    The Acknowledge button: write ack.json once (a second press keeps the
+    first time). Written whole then renamed, so the engine never reads half
+    a file. Returns the time stored.
+    """
+    existing = read_ack_epoch(live_dir, session)
+    if existing is not None:
+        return existing
+    clicked = time.time() if now is None else float(now)
+    path = ack_path(live_dir, session)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    part = path.with_name(path.name + ".part")
+    part.write_text(json.dumps({"acknowledged_epoch": clicked}), encoding="utf-8")
+    os.replace(part, path)
+    return clicked
+
+
+def acknowledgement_for(state: dict, live_dir: Path):
+    """
+    The acknowledgement to show: the engine's, once it has read ack.json;
+    before that, the click placed on the session's clock by the same function
+    the engine uses (so both always agree).
+    """
+    if state.get("acknowledged"):
+        return state["acknowledged"]
+    session = state.get("session", "")
+    replaying = state.get("replaying")
+    if replaying is None:
+        replaying = is_replay(live_dir, session)
+    return incident.acknowledgement(read_ack_epoch(live_dir, session), state.get("first_alert"),
+                                    state.get("first_alert_wall_epoch"), bool(replaying),
+                                    state.get("capture_start_epoch"))
+
+
+def alarm_is_on(state: dict, ack) -> bool:
+    """Ring, button and tone: an incident is raised and nobody has acknowledged it."""
+    return (state.get("phase") == live.INCIDENT and bool(state.get("first_alert"))
+            and not ack)
+
+
+TONE_RATE = 16000          # samples per second
+TONE_PERIOD = 1.6          # seconds per repeat (the file loops)
+TONE_PIPS = ((0.00, 0.15), (0.25, 0.40))   # two pips, start and end in seconds
+TONE_HZ = 880.0
+TONE_VOLUME = 0.2          # of full scale: quiet
+
+
+@lru_cache(maxsize=1)
+def alert_tone_wav() -> bytes:
+    """
+    The alert tone as a WAV file: two short 880 Hz pips, then silence, 1.6 s in
+    all, played on a loop. Each pip fades in and out over 10 ms so it does not
+    click. Made in code - no sound file in the repository. Cached, so the page
+    hands Streamlit the same bytes on every refresh and the player is not
+    re-created (it keeps playing across the 3-second refresh).
+    """
+    fade = int(0.010 * TONE_RATE)
+    frames = bytearray()
+    for i in range(int(TONE_PERIOD * TONE_RATE)):
+        t = i / TONE_RATE
+        value = 0.0
+        for start, end in TONE_PIPS:
+            if start <= t < end:
+                k = i - int(start * TONE_RATE)
+                left = int(end * TONE_RATE) - i
+                envelope = min(1.0, k / fade, left / fade)
+                value = TONE_VOLUME * envelope * math.sin(2 * math.pi * TONE_HZ * t)
+        frames += struct.pack("<h", int(round(value * 32767)))
+    buffer = io.BytesIO()
+    with wave.open(buffer, "wb") as out:
+        out.setnchannels(1)
+        out.setsampwidth(2)
+        out.setframerate(TONE_RATE)
+        out.writeframes(bytes(frames))
+    return buffer.getvalue()
+
+
 def containment_text(state: dict) -> str | None:
     """The CONTAINED check in one line, or None before there is an incident."""
     c = state.get("containment")
@@ -343,14 +460,37 @@ def notes_under_band(state: dict) -> list:
     return notes
 
 
-def draw_state(state: dict, live_dir: Path) -> None:
+def draw_band(state: dict, live_dir: Path, ack, sound: bool) -> None:
+    """
+    The status band. While the alarm is on, the band and its Acknowledge
+    button share one keyed container (the CSS puts the button inside the
+    band), and the tone plays from a hidden player.
+    """
+    session = state.get("session", "?")
+    if not alarm_is_on(state, ack):
+        st.html(theme.status_band(state, ack))
+        return
+    with st.container(key="alert-band"):
+        st.html(theme.status_band(state, ack, ack_button=True))
+        st.button("Acknowledge", key="ack-button", on_click=write_ack,
+                  args=(live_dir, session),
+                  help="Tells the console a person has seen the alert: the ring and the "
+                       "tone stop, and the time goes into the report. It does not "
+                       "contain anything.")
+    if sound:
+        with st.container(key="alert-tone"):
+            st.audio(alert_tone_wav(), format="audio/wav", autoplay=True, loop=True)
+
+
+def draw_state(state: dict, live_dir: Path, sound: bool = True) -> None:
     """The whole page for one moment of one session."""
     session = state.get("session", "?")
     phase = state.get("phase", live.WAITING)
     replaying = is_replay(live_dir, session)
+    ack = acknowledgement_for(state, live_dir)
 
     st.html(theme.top_bar(state, replaying=replaying, stale=is_stale(state)))
-    st.html(theme.status_band(state))
+    draw_band(state, live_dir, ack, sound)
     for text, kind in notes_under_band(state):
         st.html(theme.notice(text, kind))
 
@@ -375,13 +515,13 @@ def draw_state(state: dict, live_dir: Path) -> None:
             st.html(theme.session_card(state, replaying=replaying))
 
     if state.get("ranking"):
-        draw_report_area(state)
+        draw_report_area(state, ack)
     draw_lab_validation(state)
 
 
-def draw_report_area(state: dict) -> None:
+def draw_report_area(state: dict, ack=None) -> None:
     """Timeline, the report (Step 19 content; P3 restyles it), network and suspects."""
-    line = theme.timeline(state)
+    line = theme.timeline(state, ack)
     if line:
         st.html(line)
 
@@ -601,6 +741,11 @@ def render_page(live_dir=None, session: str | None = None,
             options = list_sessions(live_dir)
             if options and not follow:
                 chosen = st.selectbox("Session", options)
+        sound = st.toggle("Alert sound", value=True, key="alert-sound",
+                          help="A short quiet tone repeats while an incident is not "
+                               "acknowledged. A browser may block sound until the page has "
+                               "been clicked once: switch this off and on after opening the "
+                               "page.")
         st.caption("Updates every %d s. Containment is recommended, never executed."
                    % refresh_seconds)
 
@@ -620,7 +765,7 @@ def render_page(live_dir=None, session: str | None = None,
                                        "The engine is starting; its first state has not "
                                        "been written yet."))
             return
-        draw_state(state, live_dir)
+        draw_state(state, live_dir, sound=sound)
 
     body()
 

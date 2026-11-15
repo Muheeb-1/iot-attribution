@@ -138,6 +138,21 @@ Design decisions that are easy to miss:
 - Tests: ack file round trip; figures from fixture states; AppTest for acknowledged and
   unacknowledged incident.
 
+P2 as built (15 Nov 2026):
+- In INCIDENT, CONTAINED and STOPPED the band's three figures are "to detect", "to
+  acknowledge", "to contain" (as in the mockup), not devices / packets / incidents.
+- Which clock "to acknowledge" uses: live, the click time is the capture time (the packets
+  are stamped by the same laptop clock); in a replay the recording's clock runs 20 times
+  fast, so the click is placed at the alert plus the operator's REAL reaction time
+  (`incident.acknowledgement`; the engine records the real moment it raised the alert as
+  `first_alert_wall_epoch`).
+- The band icons were never drawn in the real app: Streamlit's `st.html` strips `<svg>`.
+  They are now CSS masks (`theme.ICON_PATHS`), checked in Edge.
+- Checked in Edge over its DevTools protocol: the button sits inside the band; the tone
+  stays silent until the page has been clicked, and plays after "Alert sound" was
+  switched off and on with real clicks; the same player survives the 3-second refresh
+  and loops; Acknowledge writes ack.json and the ring, button and tone go.
+
 ### P3 - the designed report and the PDF
 - New report fields, all rule-based and deterministic (no model):
   - `incident_id`: `INC-<capture date YYYYMMDD>-<trailing digits of the session name,

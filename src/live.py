@@ -100,6 +100,15 @@ engine never contains anything itself; it only confirms what the operator
 did. At STOP the session's capture files get a SHA-256 list
 (SHA256SUMS.txt in the session folder) for the report's "preserve" step.
 
+ACKNOWLEDGED (Step P2 of docs/POLISH_PLAN.md)
+---------------------------------------------
+The live page's Acknowledge button writes ack.json into the session folder
+with the operator's clock time. Every cycle the engine looks for it, and the
+first time it is there (and an alert exists) puts the time into state.json,
+the incident report and the saved meta - incident.acknowledgement explains
+which clock is used in a replay. It is read for that and nothing else: it
+cannot change a verdict, a score, the phase or the CONTAINED check.
+
 WHAT THIS FILE DOES NOT DO
 --------------------------
 It never contacts a device, a router or the broker, and never blocks
@@ -143,6 +152,7 @@ LIVE_DIR = ROOT / "pcap" / "live"
 
 STATE_FILE = "state.json"
 STOP_FILE = "STOP"
+ACK_FILE = "ack.json"               # written by the live page's Acknowledge button (Step P2)
 REPLAY_SOURCE = "replay_source"     # where --replay keeps the cut-up capture
 CAPTURE_MARKER = "CAPTURING"        # written by src/live_capture.py while it records
 
@@ -392,6 +402,9 @@ class LiveSession:
         self.evidence = None                # SHA-256 list of the files, at STOP
         self.report_file = None             # reports/<session>.html once written
         self.analysis_seconds = None        # how long the last cycle took
+        self.replaying = False              # set by replay(): the recording's clock, not ours
+        self.alert_wall_epoch = None        # this laptop's clock when the first alert was raised
+        self.acknowledged = None            # the operator's acknowledgement (Step P2)
 
         self.phase = WAITING
         self.stopped = False
@@ -602,6 +615,39 @@ class LiveSession:
             "raised_epoch": start + now,
             "found_at_stop": bool(final),
         }
+        # Kept apart from first_alert (which is saved and compared as it was):
+        # only used to place a replay's acknowledgement on the recording's clock.
+        self.alert_wall_epoch = time.time()
+
+    def _read_acknowledgement(self) -> bool:
+        """
+        Look for the page's ack.json once there is an alert; remember the first
+        one. Returns True the cycle it is first found. A file that cannot be
+        read is mentioned once and otherwise ignored - it is only a time stamp.
+        """
+        if self.acknowledged is not None or self.first_alert is None:
+            return False
+        path = self.folder / ACK_FILE
+        if not path.exists():
+            return False
+        try:
+            clicked = float(json.loads(path.read_text(encoding="utf-8"))["acknowledged_epoch"])
+        except (OSError, ValueError, KeyError, TypeError) as exc:
+            # Not a capture problem (state "problems" lists capture files), so
+            # only said once on the console; the page can be pressed again.
+            if not getattr(self, "_ack_warned", False):
+                print("  [live] %s unreadable (%s) - ignored" % (ACK_FILE, exc), file=sys.stderr)
+                self._ack_warned = True
+            return False
+        self.acknowledged = incident.acknowledgement(
+            clicked, self.first_alert, self.alert_wall_epoch, self.replaying,
+            self.capture_start_epoch)
+        return self.acknowledged is not None
+
+    def _attach_acknowledgement(self) -> None:
+        """Copy the acknowledgement into this cycle's report (rebuilt every minute)."""
+        if self.acknowledged and self.incident:
+            self.incident = incident.with_acknowledgement(self.incident, self.acknowledged)
 
     def _record_verdict(self, now: float) -> None:
         """Log the verdict whenever it changes, with the capture time it changed."""
@@ -669,6 +715,10 @@ class LiveSession:
             self._write_report()
         else:
             self._check_containment()
+        found = self._read_acknowledgement()
+        self._attach_acknowledgement()
+        if found:
+            self._write_report()
         self._log_phase(self._decide_phase())
         self.cycles.append((self.now_seconds, self.phase))
         state = self.state()
@@ -692,6 +742,8 @@ class LiveSession:
             self._analyse(final=True)
             self.analysed_windows = self.closed_windows
             self._check_containment()
+            self._read_acknowledgement()
+            self._attach_acknowledgement()
             self._write_report()
             if save:
                 self.save(force=force)
@@ -731,6 +783,7 @@ class LiveSession:
             "grace_seconds": self.grace_seconds,
             "containment": self.containment,
             "evidence": self.evidence,
+            "acknowledged": self.acknowledged,
         }
         meta_file.write_text(json.dumps(json_safe(meta), indent=2), encoding="utf-8")
         self.saved = (parquet_file, meta_file)
@@ -823,6 +876,12 @@ class LiveSession:
             "first_alert_epoch": alert.get("raised_epoch"),
             "first_alert_closed_epoch": alert.get("closed_epoch"),
             "contained_epoch": (self.containment or {}).get("contained_epoch"),
+            # Step P2: the operator's acknowledgement, and what the page needs to
+            # place an Acknowledge click on this session's clock before the
+            # engine has read it (incident.acknowledgement).
+            "acknowledged": self.acknowledged,
+            "first_alert_wall_epoch": self.alert_wall_epoch,
+            "replaying": self.replaying,
             "verdict_changes": self.verdict_changes,
             "phase_log": self.phase_log,
             "problems": self.problems,
@@ -950,7 +1009,8 @@ def _prepare_folder(folder: Path, force: bool, join: bool = False) -> bool:
     folder.mkdir(parents=True, exist_ok=True)
     if join and capture_is_recording(folder):
         return True
-    leftovers = ring_files(folder) + [p for p in (folder / STATE_FILE, folder / STOP_FILE)
+    leftovers = ring_files(folder) + [p for p in (folder / STATE_FILE, folder / STOP_FILE,
+                                                  folder / ACK_FILE)
                                       if p.exists()]
     if leftovers and not force:
         raise FileExistsError(
@@ -988,6 +1048,7 @@ def replay(pcap_path, session: str, folder=None, baseline_seconds: float = DEFAU
     sources = split_capture(pcap_path, folder / REPLAY_SOURCE, editcap=editcap, tshark=tshark)
     live = LiveSession(folder, baseline_seconds=baseline_seconds, session=session,
                        tshark=tshark, data_dir=data_dir)
+    live.replaying = True
     gap = SEGMENT_SECONDS / speed if speed and speed > 0 else 0.0
     last_print = None
 

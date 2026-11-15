@@ -40,8 +40,18 @@ slots so bars never change width as the session grows; past 40 minutes it
 shows the last 40. No per-device colours: nothing depends on telling three
 line colours apart.
 
-The only motion is the newest bar growing in (and, from P2, the band's ring
-while an incident is unacknowledged). prefers-reduced-motion turns it off.
+The only motion is the newest bar growing in, and the band's ring while an
+incident is unacknowledged (Step P2). prefers-reduced-motion turns both off.
+
+THE ALERT (Step P2)
+-------------------
+In INCIDENT, CONTAINED and STOPPED the band's three figures are the response
+times: "to detect" (first unusual connection -> alert, from the engine's
+report), "to acknowledge" (alert -> the operator pressed Acknowledge) and "to
+contain" (alert -> CONTAINED), each "--" until known. While an incident is
+not acknowledged the band rings; afterwards it says "Acknowledged HH:MM:SS".
+The Acknowledge button itself is a Streamlit button that the CSS below
+places inside the band (the band is HTML and cannot hold a widget).
 
 FONTS
 -----
@@ -58,6 +68,7 @@ HTML.
 from __future__ import annotations
 
 import html
+import urllib.parse
 from datetime import datetime
 
 import plotly.graph_objects as go
@@ -144,7 +155,6 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
             display: grid; grid-template-columns: 1fr auto; gap: 24px; align-items: center;
             background: var(--panel); transition: background .4s, border-color .4s; }
 .iot.band .state { font: 500 14px var(--body); display: flex; align-items: center; gap: 8px; margin-bottom: 6px; color: var(--soft); }
-.iot.band .state svg { width: 18px; height: 18px; flex: none; }
 .iot.band .headline { font: 600 40px/1.08 var(--display); letter-spacing: -0.005em; margin: 0; }
 .iot.band .headline .dev { font-family: var(--mono); font-size: 0.86em; font-weight: 600; }
 .iot.band .sub { color: var(--soft); margin-top: 8px; font-size: 16px; max-width: 70ch; }
@@ -162,6 +172,24 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
 .iot .kpi .v { font: 600 30px/1 var(--display); font-variant-numeric: tabular-nums; }
 .iot .kpi .v.wait { color: var(--muted); }
 .iot .kpi .k { color: var(--soft); font-size: 13px; margin-top: 5px; }
+.iot .acked { color: var(--soft); font-size: 14px; }
+.iot.band.has-ack .side { padding-right: 170px; }
+
+/* Step P2: the Acknowledge button (a Streamlit widget) placed inside the band,
+   and the alert tone's player, which is never shown */
+.st-key-alert-band { position: relative; }
+.st-key-alert-band [data-testid="stElementContainer"]:has([data-testid="stButton"]) {
+  position: absolute; left: auto; right: 26px; top: 50%; transform: translateY(-50%);
+  width: auto !important; z-index: 2; }
+/* Streamlit sets the button's wrappers to the full column width; shrink them to the button */
+.st-key-alert-band [data-testid="stButton"], .st-key-alert-band [data-testid="stButton"] > div,
+.st-key-alert-band [data-testid="stButton"] [data-testid="stTooltipIcon"] { width: auto !important; }
+.st-key-alert-band [data-testid="stButton"] button {
+  background: var(--alert); color: #2A0A10; border: 0; border-radius: 8px; padding: 12px 20px; min-height: 0; }
+.st-key-alert-band [data-testid="stButton"] button p { font: 600 15px var(--body); color: #2A0A10; }
+.st-key-alert-band [data-testid="stButton"] button:hover { filter: brightness(1.08); }
+.st-key-alert-band [data-testid="stButton"] button:focus-visible { outline: 3px solid #fff; outline-offset: 2px; }
+.st-key-alert-tone { display: none; }
 
 /* ---- cards ---- */
 .iot.card { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; padding: 18px 20px; }
@@ -234,6 +262,9 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
 
 @media (max-width: 980px) {
   .iot.band { grid-template-columns: 1fr; } .iot .side { flex-wrap: wrap; }
+  .iot.band.has-ack .side { padding-right: 0; }
+  .st-key-alert-band [data-testid="stElementContainer"]:has([data-testid="stButton"]) {
+    position: static; transform: none; }
   .iot .lane, .iot .axis { grid-template-columns: 120px 1fr; } .iot .lane .status { grid-column: 1 / -1; text-align: left; }
   .iot .strikes { justify-content: flex-start; }
 }
@@ -243,16 +274,38 @@ header[data-testid="stHeader"] { background: transparent; height: 0; }
 }
 """
 
-ICONS = {
-    "learn": '<svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">'
-             '<circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/></svg>',
-    "ok": '<svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">'
-          '<path d="M10 2l6 3v5c0 4-2.6 6.6-6 8-3.4-1.4-6-4-6-8V5z"/><path d="M7 10l2 2 4-4"/></svg>',
-    "watch": '<svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">'
-             '<path d="M1.5 10S5 4 10 4s8.5 6 8.5 6-3.5 6-8.5 6-8.5-6-8.5-6z"/><circle cx="10" cy="10" r="2.5"/></svg>',
-    "alert": '<svg aria-hidden="true" viewBox="0 0 20 20" fill="none" stroke="currentColor" stroke-width="2">'
-             '<path d="M10 2.5l8 14H2z"/><path d="M10 8v4M10 14.5v.5"/></svg>',
+# The band's icons (the mockup's drawings). Streamlit's st.html removes <svg>
+# elements, so they cannot be put in the HTML - found in Step P2: the P1 band
+# showed no icon in the real app. Each drawing is used instead as a CSS mask
+# on the state line's ::before, painted in the state colour (currentColor):
+# the band's HTML only names it, <div class="state ic-alert">.
+ICON_PATHS = {
+    "learn": '<circle cx="10" cy="10" r="7"/><path d="M10 6v4l3 2"/>',
+    "ok": '<path d="M10 2l6 3v5c0 4-2.6 6.6-6 8-3.4-1.4-6-4-6-8V5z"/><path d="M7 10l2 2 4-4"/>',
+    "watch": '<path d="M1.5 10S5 4 10 4s8.5 6 8.5 6-3.5 6-8.5 6-8.5-6-8.5-6z"/>'
+             '<circle cx="10" cy="10" r="2.5"/>',
+    "alert": '<path d="M10 2.5l8 14H2z"/><path d="M10 8v4M10 14.5v.5"/>',
 }
+
+
+def _icon_url(paths: str) -> str:
+    svg = ('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 20 20" fill="none" '
+           'stroke="black" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">'
+           '%s</svg>' % paths)
+    return 'url("data:image/svg+xml,%s")' % urllib.parse.quote(svg, safe="")
+
+
+ICON_CSS = (".iot .state[class*='ic-']::before { content: ''; width: 18px; height: 18px; flex: none;"
+            " background: currentColor; -webkit-mask: var(--ic) center / contain no-repeat;"
+            " mask: var(--ic) center / contain no-repeat; }\n"
+            + "".join(".iot .state.ic-%s { --ic: %s; }\n" % (name, _icon_url(paths))
+                      for name, paths in ICON_PATHS.items()))
+CSS += ICON_CSS
+
+
+def icon_class(name: str) -> str:
+    """'state ic-alert' - the class that draws the icon (empty name: no icon)."""
+    return "state ic-%s" % name if name in ICON_PATHS else "state"
 
 # A plain dark template for every Plotly chart, in the page's colours.
 PLOTLY_TEMPLATE = go.layout.Template(layout=dict(
@@ -441,12 +494,39 @@ def top_bar(state: dict | None, page: str = "live", replaying: bool = False,
 # The status band
 # --------------------------------------------------------------------------
 
-def band_content(state: dict) -> dict:
+def response_figures(state: dict, ack: dict | None = None) -> list:
+    """
+    The band's three figures once there is an alert (Step P2): to detect, to
+    acknowledge, to contain - each "--" until it is known. Read from the
+    engine's report, its first alert, its CONTAINED check and the
+    acknowledgement; nothing is measured here.
+    """
+    alert = state.get("first_alert") or {}
+    raised = alert.get("raised_epoch")
+    when = (state.get("incident") or {}).get("when") or {}
+    detect_s = when.get("time_to_detect_seconds")
+    if detect_s is None and raised is not None and when.get("first_unusual_epoch") is not None:
+        detect_s = raised - when["first_unusual_epoch"]
+    ack_s = (ack or {}).get("after_alert_seconds")
+    contained = _contained(state)
+    contain_s = None
+    if contained.get("contained_epoch") is not None and raised is not None:
+        contain_s = max(0.0, contained["contained_epoch"] - raised)
+
+    def text(seconds):
+        return "--" if seconds is None else duration_text(seconds)
+
+    return [(text(detect_s), "to detect"), (text(ack_s), "to acknowledge"),
+            (text(contain_s), "to contain")]
+
+
+def band_content(state: dict, ack: dict | None = None) -> dict:
     """
     What the band says, as plain parts (tested directly): css class, icon,
     the state word, the headline and the sentence under it (both already
-    HTML, data escaped), an optional progress fraction, and the figures on
-    the right.
+    HTML, data escaped), an optional progress fraction, the figures on the
+    right, whether it rings, and the acknowledgement time ("HH:MM:SS" or
+    None). ack is the operator's acknowledgement (incident.acknowledgement).
     """
     phase = state.get("phase", live.WAITING)
     devices = _devices(state)
@@ -460,7 +540,15 @@ def band_content(state: dict) -> dict:
 
     def part(cls, icon, word, head, sub, progress=None, kpis=None):
         return {"cls": cls, "icon": icon, "state": word, "headline": head, "sub": sub,
-                "progress": progress, "kpis": figures if kpis is None else kpis}
+                "progress": progress, "kpis": figures if kpis is None else kpis,
+                "ringing": False, "acked": None}
+
+    def responding(b):
+        """An incident's band: response figures, the ring until acknowledged."""
+        b["kpis"] = response_figures(state, ack)
+        b["ringing"] = phase == live.INCIDENT and not ack
+        b["acked"] = wall(ack["acknowledged_epoch"]) if ack else None
+        return b
 
     if phase == live.WAITING:
         return part("", "learn", "Waiting", "Waiting for the capture",
@@ -510,19 +598,19 @@ def band_content(state: dict) -> dict:
     if contained and not stopped:
         dest = ", ".join("<span class='mono'>%s</span>" % esc(endpoint_text(w, state.get("addresses")))
                          for w in contained.get("watching") or [])
-        return part("ok", "ok", "Contained",
+        return responding(part("ok", "ok", "Contained",
                     "Contained at %s" % esc(wall(contained.get("contained_epoch"))),
                     "<span class='mono'>%s</span> has made no connection to %s for %d seconds. "
                     "The incident stays open as the record."
                     % (esc(contained.get("device")), dest or "its new destinations",
-                       int(round(contained.get("quiet_needed_seconds") or 90))))
+                       int(round(contained.get("quiet_needed_seconds") or 90)))))
 
     if state.get("abstained"):
         word = "Session closed, origin not certain" if stopped else "Incident, origin not certain"
-        return part("watch", "watch", word, "Incident: the starting device is not certain",
+        return responding(part("watch", "watch", word, "Incident: the starting device is not certain",
                     "Too close to call between %s. Alert raised at <b>%s</b>."
                     % (", ".join("<span class='mono'>%s</span>" % esc(d)
-                                 for d in state.get("shortlist") or []), raised))
+                                 for d in state.get("shortlist") or []), raised)))
 
     others = sorted(set(state.get("onsets") or {}) - {named})
     sub = "Confidence <b>%s%%</b>. " % esc(state.get("confidence_percent"))
@@ -534,37 +622,43 @@ def band_content(state: dict) -> dict:
         if contained:
             sub += " Contained at <b>%s</b>." % esc(wall(contained.get("contained_epoch")))
         sub += " Final verdict from the whole capture."
-        return part("ok" if contained else "alert", "ok" if contained else "alert",
+        return responding(part("ok" if contained else "alert", "ok" if contained else "alert",
                     "Session closed, contained" if contained else "Session closed, final verdict",
-                    head, sub)
+                    head, sub))
     sub += " Alert raised at <b>%s</b>." % raised
     word = "Incident" + (", severity %s" % esc(severity) if severity else "")
-    return part("alert", "alert", word, head, sub)
+    return responding(part("alert", "alert", word, head, sub))
 
 
-def status_band(state: dict) -> str:
-    """The band at the top of the live page, as HTML."""
-    b = band_content(state)
+def status_band(state: dict, ack: dict | None = None, ack_button: bool = False) -> str:
+    """
+    The band at the top of the live page, as HTML. ack_button=True leaves room
+    on the right for the Acknowledge button the page puts over the band.
+    """
+    b = band_content(state, ack)
     progress = ""
     if b["progress"] is not None:
         progress = '<div class="progress"><i style="width:%.0f%%"></i></div>' % (
             100 * max(0.0, min(1.0, b["progress"])))
     kpis = "".join('<div class="kpi"><div class="v%s">%s</div><div class="k">%s</div></div>'
                    % (" wait" if v in ("--", "-") else "", esc(v), esc(k)) for v, k in b["kpis"])
+    classes = " ".join(c for c in (b["cls"], "ringing" if b["ringing"] else "",
+                                   "has-ack" if ack_button else "") if c)
+    acked = ('<span class="acked">Acknowledged %s</span>' % esc(b["acked"])) if b["acked"] else ""
     return ('<section class="iot band %s" aria-live="polite"><div>'
-            '<div class="state">%s%s</div><div class="headline">%s</div>'
+            '<div class="%s">%s</div><div class="headline">%s</div>'
             '<div class="sub">%s</div>%s</div>'
-            '<div class="side"><div class="kpis">%s</div></div></section>'
-            % (b["cls"], ICONS.get(b["icon"], ""), b["state"], b["headline"], b["sub"],
-               progress, kpis))
+            '<div class="side"><div class="kpis">%s</div>%s</div></section>'
+            % (classes, icon_class(b["icon"]), b["state"], b["headline"], b["sub"],
+               progress, kpis, acked))
 
 
 def waiting_band(title: str, sentence: str) -> str:
     """The band before any session exists (or before its state can be read)."""
     return ('<section class="iot band" aria-live="polite"><div>'
-            '<div class="state">%sWaiting</div><div class="headline">%s</div>'
+            '<div class="%s">Waiting</div><div class="headline">%s</div>'
             '<div class="sub">%s</div></div><div></div></section>'
-            % (ICONS["learn"], esc(title), esc(sentence)))
+            % (icon_class("learn"), esc(title), esc(sentence)))
 
 
 def notice(text_html: str, kind: str = "") -> str:
@@ -810,7 +904,7 @@ def session_card(state: dict, replaying: bool = False) -> str:
 # The timeline
 # --------------------------------------------------------------------------
 
-def timeline_points(state: dict) -> list:
+def timeline_points(state: dict, ack: dict | None = None) -> list:
     """(clock time, words, css class) for each moment known so far."""
     report = state.get("incident") or {}
     when = report.get("when") or {}
@@ -824,13 +918,15 @@ def timeline_points(state: dict) -> list:
         points.append((wall(when["first_unusual_epoch"]), "First unusual connection", "hot"))
     if alert.get("raised_epoch") is not None:
         points.append((wall(alert["raised_epoch"]), "Alert raised", "hot"))
+    if ack:
+        points.append((wall(ack["acknowledged_epoch"]), "Acknowledged", ""))
     if contained:
         points.append((wall(contained.get("contained_epoch")), "Contained", "good"))
     return points
 
 
-def timeline(state: dict) -> str:
-    points = timeline_points(state)
+def timeline(state: dict, ack: dict | None = None) -> str:
+    points = timeline_points(state, ack)
     if not points:
         return ""
     items = "".join('<div class="%s"><div class="t">%s</div><div class="w">%s</div></div>'

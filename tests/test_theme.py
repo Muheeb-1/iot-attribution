@@ -137,9 +137,13 @@ def test_a_quiet_session_that_stops_says_no_incident():
                                   "incident_later", "contained", "stopped"])
 def test_every_band_has_a_word_and_an_icon_never_colour_alone(name):
     band = theme.status_band(fixture(name))
-    assert "<svg" in band
-    state_word = re.search(r'<div class="state">(.*?)</div>', band).group(1)
+    found = re.search(r'<div class="state ic-(\w+)">(.*?)</div>', band)
+    assert found, band[:300]
+    icon, state_word = found.groups()
     assert plain(state_word).strip()
+    # Streamlit's st.html strips <svg> (Step P2), so the icon is a CSS mask
+    assert "<svg" not in band
+    assert ".iot .state.ic-%s { --ic: url(\"data:image/svg+xml," % icon in theme.CSS
 
 
 def test_the_waiting_band_escapes_its_text():

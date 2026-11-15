@@ -656,6 +656,71 @@ def _unsure(result, label, label_why, spread, not_judged, unseen, detection, con
     return lines
 
 
+# --------------------------------------------------------------------------
+# The operator's acknowledgement (Step P2)
+# --------------------------------------------------------------------------
+#
+# The live page has an Acknowledge button. Pressing it writes
+# pcap/live/<session>/ack.json with the operator's clock time. That is an
+# operator action, like unplugging the board: the engine reads the file only
+# to put the time in state.json and in this report. It changes no verdict,
+# score, phase or containment decision.
+#
+# WHICH CLOCK. In a live session the packets are stamped by the same laptop
+# clock the operator's click is, so the click time IS the capture time. In a
+# replay the page shows the recording's clock (13 Nov, 20 times fast) while
+# the operator clicks on today's clock. There the acknowledgement is placed
+# on the recording's clock at the alert plus the operator's REAL reaction
+# time (click minus the real moment the engine raised the alert), so "to
+# acknowledge" is the human's actual reaction in both cases.
+
+def acknowledgement(clicked_epoch, first_alert, alert_wall_epoch=None, replaying=False,
+                    start_epoch=None) -> dict | None:
+    """
+    The acknowledgement as report facts, or None (no click, or no alert yet).
+
+    clicked_epoch     the operator's clock when Acknowledge was pressed
+    first_alert       the engine's first alert (raised_epoch is used)
+    alert_wall_epoch  the operator's clock when the engine raised that alert
+                      (needed only for a replay)
+    """
+    if clicked_epoch is None or not first_alert or first_alert.get("raised_epoch") is None:
+        return None
+    raised = float(first_alert["raised_epoch"])
+    clicked = float(clicked_epoch)
+    if replaying and alert_wall_epoch is not None:
+        epoch = raised + max(0.0, clicked - float(alert_wall_epoch))
+        clock = "replay: the operator's real reaction time, placed on the recording's clock"
+    else:
+        epoch = max(raised, clicked)       # a click cannot come before the alert it answers
+        clock = "the capture clock (the laptop's own clock)"
+    return {
+        "acknowledged_epoch": epoch,
+        "acknowledged_seconds": None if start_epoch is None else epoch - float(start_epoch),
+        "after_alert_seconds": epoch - raised,
+        "clicked_epoch": clicked,
+        "clock": clock,
+    }
+
+
+def acknowledged_line(ack: dict | None) -> str:
+    """One sentence for the report."""
+    if not ack:
+        return "Not acknowledged by the operator."
+    return ("Acknowledged by the operator at %s, %s after the alert."
+            % (datetime.fromtimestamp(float(ack["acknowledged_epoch"])).strftime("%H:%M:%S"),
+               duration_text(ack["after_alert_seconds"])))
+
+
+def with_acknowledgement(report: dict, ack: dict | None) -> dict:
+    """The report with the operator's acknowledgement added (a new field only)."""
+    if not report or not ack or report.get("status") in (None, "failed", "no incident"):
+        return report
+    report = dict(report)
+    report["acknowledged"] = ack
+    return report
+
+
 def with_containment(report: dict, containment: dict) -> dict:
     """The report with a fresh containment check (status and section 7 follow it)."""
     if not report or report.get("status") == "no incident":
@@ -707,6 +772,8 @@ def render_text(report: dict) -> str:
         return "\n".join(out)
     w = report["when"]
     out += ["", "2. WHEN", "   " + w["sentence"]]
+    if report.get("acknowledged"):
+        out.append("   " + acknowledged_line(report["acknowledged"]))
     for m in w["abnormal_minutes"]:
         out.append("   abnormal minute %s  score %.1f" % (m["text"], m["score"]))
     where = report["where"]
@@ -772,6 +839,8 @@ def render_html(report: dict) -> str:
             p.append("<p><b>%s</b></p>" % e(containment_line(c, start)))
         w = report["when"]
         p.append("<h2>2. When</h2><p>%s</p>" % e(w["sentence"]))
+        if report.get("acknowledged"):
+            p.append("<p>%s</p>" % e(acknowledged_line(report["acknowledged"])))
         if w["abnormal_minutes"]:
             p.append("<table><tr><th>abnormal minute</th><th>score</th></tr>%s</table>" % "".join(
                 "<tr><td>%s</td><td>%.1f</td></tr>" % (e(m["text"]), m["score"])
