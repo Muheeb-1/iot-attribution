@@ -1,8 +1,9 @@
 # Live demo - the script for the judges
 
-Version 2, 15 Nov 2026 (polish step P5), for the final build (tag `polish-p5`). Every time
-below was measured in the hardware sessions of 12-13 Nov (rehearsal_02, live_session_01-07)
-or in the polish-phase replays. Nothing here is a guess. If the demo does something this page
+Version 2.1, 15 Nov 2026 (polish step P6), for the final build (tag `demo-ready`; this script
+was followed word for word in the two dress rehearsals, live_session_08 and 09, both correct).
+Every time below was measured in the hardware sessions of 12-15 Nov (rehearsal_02,
+live_session_01-09) or in the polish-phase replays. Nothing here is a guess. If the demo does something this page
 does not describe, say so plainly and use the fallback ladder (section 5).
 
 **The whole session takes about 20 minutes:** 12 minutes of learning, then about 4 to the
@@ -91,10 +92,10 @@ Put **terminal 2 (the attacker) beside the browser**, so the judges see both at 
 | C+12 (measured +12:09) | green band **"Monitoring 3 devices"**, "Baseline established at hh:mm:ss. No device is over the line."; every lane says **"Normal"** | in terminal 6: `python -m src.scenario --run live_session_NN --origin esp32-03` | "I am now sending one command that compromises one of these two boards. The system does not know which." |
 | A+0:30 | nothing yet on the page | point at **terminal 2**: an "attacker received:" block - the board's MAC, IP, Wi-Fi name, readings | "That is the board leaking its data to an attacker, every 30 seconds. Small, quiet, regular - the way real malware calls home." |
 | A+1 to A+3 | amber band **"Watching esp32-03"**, "1 of 3 minutes in a row over the line", then **"2 of 3 ... One more raises an incident."**; that board's lane shows red bars over the dashed line and says **"Watching 2 of 3"** | nothing | "One odd minute is not enough to accuse a device - this laptop has odd minutes all the time. It needs three in a row." |
-| **A+3:16 to A+3:54** (measured) | red band, **ringing**: **"The attack started on esp32-03"**, state line "Incident, severity high", "Confidence 100%. No other device behaved abnormally. Alert raised at hh:mm:ss."; a quiet two-pip **tone** repeats; an **Acknowledge** button sits in the band. Under it the strip **"Not contained yet. Last connection to 192.168.0.200:4444 at ..."**. The right card becomes **"How it was found"**; below, the **Incident report**: incident number, severity, origin, confidence, **Analyst summary**, timeline, **attack techniques**, **what to do** | **click Acknowledge** (the ring and the tone stop; the band shows "Acknowledged hh:mm:ss" and the "to acknowledge" figure fills in) | "It names the board. Here is how it found it: a new destination, port 4444, every 30 seconds, 496 bytes - a place it never talked to while learning." |
+| **A+2:37 to A+3:54** (measured; usually after A+3:16) | red band, **ringing**: **"The attack started on esp32-03"**, state line "Incident, severity high", "Confidence 100%. No other device behaved abnormally. Alert raised at hh:mm:ss."; a quiet two-pip **tone** repeats; an **Acknowledge** button sits in the band. Under it the strip **"Not contained yet. Last connection to 192.168.0.200:4444 at ..."**. The right card becomes **"How it was found"**; below, the **Incident report**: incident number, severity, origin, confidence, **Analyst summary**, timeline, **attack techniques**, **what to do** | **click Acknowledge** (the ring and the tone stop; the band shows "Acknowledged hh:mm:ss" and the "to acknowledge" figure fills in) | "It names the board. Here is how it found it: a new destination, port 4444, every 30 seconds, 496 bytes - a place it never talked to while learning." |
 | a few seconds after the alert | the Analyst summary's line turns green: **"Written by the AI analyst (gemini-3.6-flash). Every fact checked against the evidence."** (Before that it says "Template wording - the AI analyst is being asked.") | point at it | "A language model writes this summary - but only from facts we hand it, and every name, time and number is checked before it is shown. The verdict never comes from the model." |
 | right after | "What to do": **Isolate esp32-03. Pull its power, or block MAC ... on the router.** | **unplug the attacked board's USB power** (the system recommends; a person acts) | "The system never acts by itself. It tells the operator exactly what to do - I am doing it now by hand." |
-| about 90 s after the last beacon (measured 1 min 21 s to 2 min 14 s after the alert, incl. reaction time) | green band **"Contained at hh:mm:ss"**, "esp32-03 has made no connection to 192.168.0.200:4444 for 90 seconds."; the lane reads **"Offline, contained"**; "to contain" fills in; the "Isolate" step is ticked | click **Create PDF**, then **Download PDF** (a few seconds; Edge makes it) | "It waited 90 seconds of silence from that board and confirms from the traffic that the attack has stopped. Here is the report as a PDF." |
+| about 90 s after the last beacon (measured 1 min 21 s to 2 min 14 s after the alert, incl. reaction time; Acknowledge took 11-16 s in the dress rehearsals) | green band **"Contained at hh:mm:ss"**, "esp32-03 has made no connection to 192.168.0.200:4444 for 90 seconds."; the lane reads **"Offline, contained"**; "to contain" fills in; the "Isolate" step is ticked | click **Create PDF**, then **Download PDF** (a few seconds; Edge makes it) | "It waited 90 seconds of silence from that board and confirms from the traffic that the attack has stopped. Here is the report as a PDF." |
 | after CONTAINED | | **terminal 5: Ctrl+C** (stops the capture; the engine makes its final pass and asks the AI once more, up to 25 s) | "Stopping the capture. Everything recorded is hashed - SHA-256 - so this is the evidence record." |
 | a few seconds later | band "Session closed, contained", **"The attack started on esp32-03"**, "Final verdict from the whole capture."; note "Saved as data/live_session_NN.parquet"; **Download PDF** is offered straight away (the engine wrote `reports\live_session_NN.pdf`) | at the bottom open **"Lab validation"** and tick **"Compare with the recorded answer"** → **"Correct. The attack really did start on esp32-03."** | "Only now does it open the answer file the attack script wrote. It was right." |
 
@@ -189,8 +190,10 @@ checked against the engine's own record of the day).
 Why about four minutes: the alert needs **three abnormal minutes in a row**. The minute in
 which the attack starts is usually not abnormal yet: the command lands part-way through it,
 and the first beacon comes 30 s later. So it is the end of the third full minute after that,
-plus a few seconds to finish the capture file: 3 to 4 minutes. Measured: **3 min 16 s to
-3 min 54 s in 7 hardware sessions.** It is a deliberate trade. In 12 recorded attacks the
+plus a few seconds to finish the capture file: 3 to 4 minutes. Measured: **2 min 37 s to
+3 min 54 s in 9 hardware sessions** (all but one from 3 min 16 s; in session 08 the minute
+holding the first beacon was already abnormal, so the count started a minute early). It is a
+deliberate trade. In 12 recorded attacks the
 innocent laptop had at least one abnormal minute in 9, two in a row in 1, and three in a row
 in none. Alerting after one minute would have accused the wrong device most of the time.
 Accusing the wrong device is worse than being late: someone would unplug a healthy machine.
@@ -198,8 +201,9 @@ Accusing the wrong device is worse than being late: someone would unplug a healt
 **Why not just use anomaly detection?**
 Anomaly detection tells you *something* is odd. It does not tell you *where it started*,
 and the most anomalous device is often not the one attacked. Measured: "blame the
-strangest-looking device" was right in **0 of 20 real attacks** (12 batch, 2 rehearsals, 6 live
-sessions), because the noisy innocent laptop always looks strange. We do use anomaly
+strangest-looking device" was right in **1 of 22 real attacks** (12 batch, 2 rehearsals, 8 live
+sessions), because the noisy innocent laptop usually looks stranger. (The one hit, session 08:
+the board's learned normal happened to be perfectly flat, so its first beacon looked extreme.) We do use anomaly
 detection, as the first stage. V5 then adds the timing and the causal story: who went
 abnormal first, who contacted whom, which new addresses they share. On the hard simulated
 benchmark, where an attack spreads and hops through a server, "blame whoever went odd first"
@@ -234,20 +238,20 @@ measurements and is complete without any model. With `--llm cloud` a cloud model
 what the pattern usually means and suggests one thing to check, in at most 4 sentences. Every
 name, time and number in its text is checked against those facts before it is shown;
 anything else is thrown away and the template wording is shown, labelled as such. Measured
-6 of 6 passing, 1.6-5.2 s. No packet contents and no Wi-Fi password are sent.
+6 of 6 passing, 1.6-5.2 s; in the two dress rehearsals all 4 real calls passed, 2.1-4.1 s. No packet contents and no Wi-Fi password are sent.
 
 **Other questions that come up**
 
 - *Does it block the attack?* No, by design. It recommends; a person acts. An automatic block on
   a wrong verdict would take a healthy device offline. It then **confirms** containment from the
-  traffic (90 s of silence) - confirmed for real in all 6 live sessions.
+  traffic (90 s of silence) - confirmed for real in all 8 live sessions.
 - *What do the ATT&CK codes mean?* They name the standard technique the measured pattern is
   **consistent with** - T1571 non-standard port (4444), T1029 scheduled transfer (every 30 s),
   T1041 data leaving over the control channel (496 bytes out, 170 back). Rules, not guesses.
 - *How is severity decided?* A fixed rule, printed on the report: critical if more than one
   device is flagged, high if one device has a new repeating destination, medium otherwise.
 - *How do you know it is not tuned to these captures?* The three fixes of Step 18 were found on
-  earlier captures. Everything recorded after them - rehearsal_02 and live sessions 01-07 - is
+  earlier captures. Everything recorded after them - rehearsal_02 and live sessions 01-09 - is
   an independent test: correct every time, at 100%. Old and new rules are both still scored.
 - *False alarms?* 0 in 24 attack-free 25-minute sessions under today's rules (1 under the old
   rule). Caveat: in 2 of the 10 sessions with the laptop, the laptop had too little clean

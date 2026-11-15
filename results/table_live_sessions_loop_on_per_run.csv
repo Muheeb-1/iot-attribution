@@ -4,3 +4,5 @@ live_session_03,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-
 live_session_04,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,,new,2,2,2,2,2,2,1,1,
 live_session_05,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,,new,2,2,2,2,2,2,1,1,board back on before STOP
 live_session_07,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,,new,2,2,2,2,2,2,1,1,
+live_session_08,capture,esp32-02,True,1,1,1.0,False,False,0,0,True,True,1,esp32-02,,new,3,3,1,1,2,2,1,1,
+live_session_09,capture,esp32-03,True,1,1,1.0,False,False,0,0,True,True,1,esp32-03,,new,2,2,2,2,2,2,1,1,

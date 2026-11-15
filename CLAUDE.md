@@ -6,6 +6,9 @@ from a small IoT lab, works out which device an attack STARTED from (method V5),
 a validated plain-English incident brief with response actions, shown on a Streamlit page.
 Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
 
+**FROZEN at tag `demo-ready` (15 Nov 2026): no code changes unless Muheeb asks. See the
+section "FROZEN at tag `demo-ready`" below.**
+
 ## Status - verified 26 Oct 2026 against commit ee805cd ("Step 14")
 
 - Steps 1-14 are done and pushed. The local folder matched GitHub HEAD exactly; only
@@ -139,6 +142,33 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   folder and compared; `results/table1_per_run.csv` and `table_live_per_run.csv` are left as
   they are (a re-run only adds the Step 18 columns).
 - Next: P6 (two dress rehearsals on hardware, then tag `demo-ready` and freeze). Not started.
+  (Done 15 Nov - see below.)
+
+## FROZEN at tag `demo-ready` (15 Nov 2026) - read this first
+
+- **The code is frozen at tag `demo-ready`. From now on: no code changes unless Muheeb asks
+  for one.** This overrides every "Next:" line above. Not even small fixes or tidy-ups; if
+  something looks wrong, report it in plain English and wait. Answering questions, running
+  the demo, replays and scoring into a scratch folder are fine.
+- P6 done: the two dress rehearsals ran as `live_session_08` (esp32-02) and `live_session_09`
+  (esp32-03), final build, `--llm cloud`, LIVE_DEMO.md followed, nothing off-plan. Both
+  CORRECT at 100%, only the attacked board flagged. Alert 2 min 37 s / 3 min 38 s after the
+  trigger, acknowledged +10.7 s / +16.2 s, CONTAINED 1 min 53 s / 1 min 22 s after the
+  alert (09's CONTAINED was 14:59:35, not "about 14:59:45"). AI analyst 4 of 4 calls passed.
+- Figures now: live sessions **8 of 8** (7 of 7 loop on); real attacks **22 of 22** (12 batch +
+  2 rehearsals + 8 live); **9 hardware sessions** under today's rules (rehearsal_02 + 8 live);
+  alert **2:37-3:54** after the trigger (all but 08 from 3:16); CONTAINED **1:21-2:14** after
+  the alert. B2 "strangest-looking" is now right in 1 of 22 (session 08), no longer 0.
+- Why 08 was faster (checked, `tests/test_p6.py`): esp32-02's broker connection never appears
+  in that capture, so its learned normal had zero incoming bytes; the minute holding the first
+  beacon scored 106 instead of ~3.2 and counted as minute 1 of 3. Same detector.
+- Replays of 08/09 give the same verdict, onset, closed and CONTAINED second; the alert is
+  raised 4.5 s later in the replay (ring-file drift). Session 07 (the practised fallback) has none.
+- Tables: per-run/timing files gained rows 08, 09 only (01-07 byte-identical to `core-locked`);
+  the summary tables are recomputed over 8 / 7 sessions. Answer files and `data/` stay
+  gitignored, as for 01-07. The one code change in P6: the sidebar's "›" button got its own
+  left margin in `dashboard/theme.py` (it was floating over the title and report lines).
+- Tests: 732 passed, 6 skipped (P6). Details: `docs/POLISH_PLAN.md`, "P6 as built".
 
 ## Now - final phase, approved 11 Nov 2026
 
@@ -212,7 +242,7 @@ published numbers and stay untouched.
 ```
 .venv\Scripts\activate
 python -m src.generate --runs 30 ; python -m src.generate --runs 30 --easy   # test data
-python -m pytest                                      # all pass, 6 skipped expected (was 458 + Step 20/22 tests)
+python -m pytest                                      # all pass, 6 skipped expected (732 passed, 6 skipped at P6)
 python -m src.evaluate --runs 30                      # simulated table -> results/table1.csv
 # real attacks, OLD rule (the published table_live.csv, from the saved runs):
 python -m src.evaluate --rules old --prefix live_batch --label live --runs 12 --out results/table_live.csv

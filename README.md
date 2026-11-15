@@ -7,15 +7,18 @@ incident report with the response actions - while the capture is still running.
 Final-year B.E. project, CSE (Data Science), BIET Davangere (VTU 2022 scheme),
 team of four. Python 3.12 on Windows 11.
 
-Status (13 Nov 2026): Steps 1-22 done. The live system has been tested on the real
-lab hardware in 6 fresh attack sessions plus one rehearsal. It named the right board
-at 100% confidence in all 7. The alert came 3 min 16 s to 3 min 54 s after the
+Status (15 Nov 2026): Steps 1-22 and the polish phase done; the code is frozen at tag
+`demo-ready`. The live system has been tested on the real lab hardware in 8 fresh attack
+sessions plus one rehearsal - 9 hardware sessions under today's rules. It named the right
+board at 100% confidence in all 9. The alert came 2 min 37 s to 3 min 54 s after the
 attack started, and every containment was confirmed from the traffic.
 
-Polish phase (14-15 Nov, tags `polish-p1` to `polish-p5`, core locked at `core-locked`): a
+Polish phase (14-15 Nov, tags `polish-p1` to `polish-p5b`, core locked at `core-locked`): a
 console in the style of a security product, an alert that rings until acknowledged, a
 designed 2-page incident report with a PDF, and an optional AI analyst summary that is
 fact-checked before it is shown. No verdict or score changed (checked after every step).
+P6, the two dress rehearsals on hardware with the final build (live_session_08 and 09), were
+both correct.
 How to run the demo: [`docs/LIVE_DEMO.md`](docs/LIVE_DEMO.md). How it works, for the viva:
 [`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md).
 
@@ -52,8 +55,10 @@ So the naive answers ("blame whoever sent the most data", "blame whoever looks
 strangest", "blame whoever went odd first") are wrong a lot of the time. On our
 hard simulated benchmark the best of those standard approaches is right **17%**
 of the time. On the real lab, "blame the strangest-looking device" was wrong in
-**every one** of 20 real attacks (12 batch captures, 2 rehearsals, 6 live
-sessions): the device that looks strangest is not the one that was attacked.
+**21 of 22** real attacks (12 batch captures, 2 rehearsals, 8 live sessions): the
+device that looks strangest is usually not the one that was attacked. (The one time it
+was right, live_session_08, the attacked board's learned normal happened to be perfectly
+flat - see "Why the alert takes about four minutes" below.)
 
 ## What this project does instead
 
@@ -273,13 +278,22 @@ lab laptop's clock (IST).
 | live_session_05 | esp32-02 | 18:44:06 | 18:47:53 | 3 min 47 s | 18:49:36 | 1 min 43 s | ✓ 100% | **board back on before STOP** |
 | live_session_06 | - | - | - | - | - | - | not scored | **aborted**: stopped during baseline, no attack sent |
 | live_session_07 | esp32-03 | 19:29:48 | 19:33:27 | 3 min 39 s | 19:34:49 | 1 min 21 s | ✓ 100% | |
+| live_session_08 | esp32-02 | 14:31:26 | 14:34:03 | 2 min 37 s | 14:35:56 | 1 min 53 s | ✓ 100% | P6 dress rehearsal 1 (15 Nov) |
+| live_session_09 | esp32-03 | 14:54:35 | 14:58:13 | 3 min 38 s | 14:59:35 | 1 min 22 s | ✓ 100% | P6 dress rehearsal 2 (15 Nov) |
 
 (rehearsal_02, 12 Nov, esp32-03: also correct at 100%, alert 3 min 54 s after the trigger.)
 
+Sessions 08 and 09 were run with the final build, following `docs/LIVE_DEMO.md`: sound,
+Acknowledge (10.7 s and 16.2 s after the alert), unplug, CONTAINED, PDF, and the AI
+analyst summary (passed the fact check both times). Nothing went off-plan.
+
 | set | sessions | V5 top-1 | top-3 | abstained | B4 | B3 | B1 / B2 |
 |---|---:|---:|---:|---:|---:|---:|---:|
-| all scored live sessions (`table_live_sessions.csv`) | 6 | **100%** | 100% | 0% | 100% | 17% | 0% / 0% |
-| laptop loop on only (`table_live_sessions_loop_on.csv`) | 5 | **100%** | 100% | 0% | 100% | 0% | 0% / 0% |
+| all scored live sessions (`table_live_sessions.csv`) | 8 | **100%** | 100% | 0% | 100% | 13% | 0% / 13% |
+| laptop loop on only (`table_live_sessions_loop_on.csv`) | 7 | **100%** | 100% | 0% | 100% | 0% | 0% / 14% |
+
+(Up to session 07 these read 6 sessions, B3 17%, B2 0%; and 5 sessions, B2 0%. B2's one hit
+is live_session_08, explained below.)
 
 What the notes mean (each is in `evaluate.SESSION_NOTES` / `ABORTED_SESSIONS`, and
 printed beside the session in every table):
@@ -300,7 +314,7 @@ printed beside the session in every table):
 Other things the files show:
 
 * Every beacon in every session came from the attacked board: one connection every
-  30.0 s, 496 bytes out. That is the same on the old (01) and new (02-07) firmware,
+  30.0 s, 496 bytes out. That is the same on the old (01) and new (02-09) firmware,
   because the detector never reads payloads.
 * **"After alert"** includes the operator's reaction time plus the 90 s of silence
   the CONTAINED check waits for. In session 07 the last beacon (19:33:19) came 8.7 s
@@ -308,6 +322,15 @@ Other things the files show:
   due (19:33:49), so CONTAINED came 81 s after the alert.
 * Replaying session 07's recording through the live path (`--replay`, speed 20) gives
   the same alert second (+968.9 s) and CONTAINED second (+1050.1 s) as the hardware run.
+* Replaying sessions 08 and 09 the same way gives the same verdict, onset minute, minute
+  the alert closed on (+905 s, +965 s) and CONTAINED second (+1018.9 s, +1047.3 s). The
+  alert itself is raised 4.5 s later in the replay (+910.0 vs +905.5, +969.9 vs +965.5):
+  by minute 15 the live recorder's 10-s files had drifted 4.5 s from the replay's even
+  10-s cuts, and the alert is raised at the end of the file that completes the minute.
+  (Session 07, the one practised for fallback rung 2, has no such drift.)
+* laptop-i3 was never flagged. In session 09 it came closest: over the line in minutes
+  12, 14, 16 and 18, each time followed by a normal minute - the three-in-a-row rule is
+  what kept it unflagged.
 
 ### Why the alert takes about four minutes
 
@@ -315,7 +338,19 @@ The trigger lands part-way through a minute, and the first beacon comes 30 s lat
 so the minute the attack starts is usually not yet abnormal. Every later minute is.
 The alert is raised when the **third** abnormal minute closes (plus 5 s grace and the
 10-s capture file): **3 to 4 minutes** depending on where in the minute the attack
-starts. Measured: 3 min 16 s to 3 min 54 s in 7 hardware sessions.
+starts. Measured: 2 min 37 s to 3 min 54 s in 9 hardware sessions (rehearsal_02 and live
+sessions 01-05, 07-09); all but session 08 between 3 min 16 s and 3 min 54 s.
+
+**Why session 08 was faster (2 min 37 s).** Its first beacon came 1 s before its minute
+closed, alone (the next one is 30 s later). In sessions 01, 03, 05 and 09 a minute like
+that - one late beacon - scored 3.2, just under the line, so the count of three started a
+minute later. In 08 it scored 106: esp32-02's connection to the broker never appears in
+that capture (in every other session it appears in the first learning minute, about 9 kB
+in; most likely it was already open before recording started), so its learned normal had
+no incoming bytes at all and the beacon's 170 bytes back were far outside it. That minute
+counted as the first of three. Nothing in the detector changed - it is what that session's
+baseline looked like - and it is also why "blame the strangest-looking device" (B2) was
+right in that one session.
 
 Three-in-a-row is deliberate. In the 12 batch attacks the innocent laptop had at
 least one abnormal minute in 9 runs, two in a row in 1, and three in a row in none.
@@ -340,7 +375,7 @@ without any language model and cannot fail in a demo**. It has eight sections:
 
 **CONTAINED** is confirmed from the traffic: once the named device has made no connection
 to the section-4 destination for 90 s, the page turns green with the time. Confirmed on real
-containments in all 6 live sessions. At STOP a `SHA256SUMS.txt` of the capture files is
+containments in all 8 live sessions. At STOP a `SHA256SUMS.txt` of the capture files is
 written as the evidence record.
 
 **The designed report** (polish step P3). On the page and on paper the operator sees the
@@ -386,7 +421,8 @@ running counts, no unflagged device, no claim the measurements cannot show, one 
 time). Otherwise the page and the report say "Template wording - the AI analyst was not
 reachable" and show the template's sentences. The verdict, the numbers and the playbook never
 come from the model, and the engine never waits for it. Measured (P5b) the way a session
-calls - 6 calls, one a minute: **6 of 6 passed, 1.6-5.2 s**. (A looser first version passed 7
+calls - 6 calls, one a minute: **6 of 6 passed, 1.6-5.2 s** - and in the two dress
+rehearsals (sessions 08, 09) all 4 real calls passed, 2.1-4.1 s. (A looser first version passed 7
 of 10 rapid calls in P5 - the 3 failures were refusals of calls seconds apart - and was not
 adopted then.)
 
@@ -479,7 +515,8 @@ Add `--rules old` or `--rules step18` to any real-capture line to reproduce the 
 
 ## Limits, stated honestly
 
-* **About 4 minutes** from attack to confirmed alert, by design (3 one-minute windows).
+* **About 4 minutes** from attack to confirmed alert, by design (3 one-minute windows;
+  measured 2 min 37 s to 3 min 54 s).
 * **A clean baseline is needed first** (12 minutes; 8 minimum). An attack during the baseline
   is learned as normal and will not be detected.
 * **The capture point sees only the master laptop's traffic plus broadcasts.** Board-to-board
@@ -491,9 +528,9 @@ Add `--rules old` or `--rules step18` to any real-capture line to reproduce the 
   keep when the attack spreads.
 * **laptop-i3 is the main false-alarm risk.** Three abnormal minutes in a row would flag it.
   It has not happened in any session under today's rules: in every live session only the
-  attacked board was flagged, including the 5 with the laptop's loop running.
+  attacked board was flagged, including the 7 with the laptop's loop running.
 * **The fixes were found on the captures they improve** (C1 on the batch, C2/C3 on rehearsal_01).
-  rehearsal_02 and live sessions 01-07 are the independent check.
+  rehearsal_02 and live sessions 01-09 are the independent check.
 * **The brief can be confidently wrong when the method is wrong.** The validator is a
   transcription guard, not a correctness guarantee.
 
@@ -533,3 +570,4 @@ and measurements for Steps 15-22 are in `docs/LIVE_PLAN.md`.
 | P4 | Polish: the AI analyst (cloud), fact-checked; template wording when offline | 2-9 s per call |
 | P5 | Polish: documents; saved reports re-created in the new design; a prompt that interprets, measured and not adopted (7/10) | |
 | P5b | The interpreting prompt tightened (4 sentences, 650 characters), 5 s wait after HTTP 429; re-measured one call a minute | 6/6 passed, 1.6-5.2 s - now live |
+| P6 | Two dress rehearsals on hardware (live_session_08, 09), scored; the sidebar arrow given its own margin; tag `demo-ready`, code frozen | 8/8 live sessions, 22/22 real attacks |

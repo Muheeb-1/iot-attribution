@@ -5,3 +5,5 @@ live_session_03,esp32-02,17:12:13,esp32-02,True,17:16:08,234.3,229.0,False,17:16
 live_session_04,esp32-03,17:37:03,esp32-03,True,17:40:26,203.1,198.3,False,17:40:33,7.0,True,17:42:03,97.0,esp32-03,
 live_session_05,esp32-02,18:44:06,esp32-02,True,18:47:53,227.1,220.2,False,18:48:06,13.0,True,18:49:36,103.0,esp32-02,board back on before STOP
 live_session_07,esp32-03,19:29:48,esp32-03,True,19:33:27,218.8,215.0,False,19:33:19,-8.7,True,19:34:49,81.3,esp32-03,
+live_session_08,esp32-02,14:31:26,esp32-02,True,14:34:03,156.7,156.2,False,14:34:26,23.4,True,14:35:56,113.4,esp32-02,
+live_session_09,esp32-03,14:54:35,esp32-03,True,14:58:13,218.4,217.8,False,14:58:05,-8.3,True,14:59:35,81.7,esp32-03,

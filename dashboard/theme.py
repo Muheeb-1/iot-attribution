@@ -126,7 +126,13 @@ CSS = """
                           border-radius: 4px; padding: 0.1em 0.35em; }
 header[data-testid="stHeader"] { background: transparent; height: 0; }
 [data-testid="stToolbar"], [data-testid="stDecoration"], [data-testid="stStatusWidget"] { display: none; }
-[data-testid="stMainBlockContainer"], .block-container { max-width: 100%; padding: 0.75rem 1.5rem 3rem; }
+/* Step P6: Streamlit's "open the sidebar" arrow (a chevron that looks like a stray
+   character) is fixed to the window's top-left corner while the page scrolls under it,
+   so it sat on the "o" of the title and, scrolled, just left of "Severity rule" and
+   "Attack techniques seen". It must stay (the sidebar holds the Alert sound switch), so
+   it gets its own left margin: arrow 0.5rem-2.75rem, page content from 3.5rem. */
+[data-testid="stSidebarCollapsedControl"] { left: 0.5rem; top: 0.75rem; }
+[data-testid="stMainBlockContainer"], .block-container { max-width: 100%; padding: 0.75rem 1.5rem 3rem 3.5rem; }
 [data-testid="stSidebar"] { background: #0B1120; border-right: 1px solid var(--line); }
 [data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"]) { border-color: var(--line); }
 [data-testid="stExpander"] details { background: var(--panel); border: 1px solid var(--line); border-radius: 10px; }

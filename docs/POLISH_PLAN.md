@@ -3,7 +3,7 @@
 Version 1, 14 Nov 2026. **Approved by Muheeb on 14 Nov 2026** - this replaces the
 "no code changes after the freeze" note and the "do not start Step 23 without asking" note
 in CLAUDE.md. The core is locked at git tag `core-locked` (commit 7ca51aa): 6 of 6 live
-sessions correct, full suite green. Nothing in this plan may change a verdict or a score.
+sessions correct, full suite green. (After P6: 8 of 8, frozen at tag `demo-ready`.) Nothing in this plan may change a verdict or a score.
 
 ## 1. What this plan is for
 
@@ -357,6 +357,52 @@ P5b as built (15 Nov 2026):
 - `rehearsal_03` (esp32-02) and `rehearsal_04` (esp32-03), following `docs/LIVE_DEMO.md`
   word for word, with sound, Acknowledge, unplug, CONTAINED, PDF. In one of them also do
   fallback rung 2 once. Then tag `demo-ready`. After that: no code changes.
+
+P6 as built (15 Nov 2026):
+- The two rehearsals were recorded as ordinary live sessions, `live_session_08` (esp32-02)
+  and `live_session_09` (esp32-03), not as rehearsal_03/04, so they are scored with the
+  other live sessions. Final build, `--llm cloud`, LIVE_DEMO.md followed; nothing went
+  off-plan (no `SESSION_NOTES` entry). Fallback rung 2 (`--replay` of live_session_07 as
+  replay_demo_01, a test output, not committed) gave the same alert second.
+- Measured from the engine's own records (`evaluate.py` timing table) - all clocks IST:
+
+  | session | trigger | alert | to detect | acknowledged | CONTAINED | after alert | V5 |
+  |---|---|---|---:|---|---|---:|---|
+  | 08 | 14:31:26 | 14:34:03 | 2 min 37 s | 14:34:14 (+10.7 s) | 14:35:56 | 1 min 53 s | esp32-02, 100% |
+  | 09 | 14:54:35 | 14:58:13 | 3 min 38 s | 14:58:29 (+16.2 s) | 14:59:35 | 1 min 22 s | esp32-03, 100% |
+
+  Session 09's CONTAINED was 14:59:35 (reported on the day as "about 14:59:45"). Only the
+  attacked board was flagged in either session. AI analyst: 4 of 4 calls passed, 2.1-4.1 s.
+- Session 08's faster alert, checked: its first beacon came 1.1 s before its minute closed
+  (the first monitored minute). Being in the first monitored minute is not the reason -
+  session 09's first beacon also was, 2.7 s before the close. The reason is the score: a
+  minute holding one beacon scored 3.19-3.25 (under 4.0) in sessions 01, 03, 05 and 09, but
+  106 in 08, because esp32-02's broker connection never appears in that capture (in every
+  other session it appears in the first learning minute, ~9 kB in), so its learned normal
+  had zero incoming bytes and the beacon's 170 bytes back were far outside it
+  (`bytes_in` spread fell back to 1). So in 08 the minute of the first beacon was minute 1
+  of 3. Same detector; that session's baseline was different. The same flat baseline is
+  why B2 ("strangest-looking") was right once.
+- Scored the same way as 01-07 (`--runs 9`; `--runs 9 --exclude live_session_02`):
+  sessions 01-07's rows in the per-run and timing files are unchanged; 08 and 09 are new
+  rows. The summary tables are recomputed over the larger set (as Step 21 did): all
+  sessions 8, V5 top-1 100%, B4 100%, B3 12.5% (was 16.7% of 6), B2 12.5% (was 0%), B1 0%;
+  loop on 7, V5 100%, B2 14.3% (was 0%). Re-converting the raw captures (`--pcap-dir
+  pcap/live`) gives the same verdict for all 8. Data files: as for 01-07, the answer files
+  and `data/` runs stay gitignored; only the `results/` tables are committed.
+- Replays of 08 and 09 through the live path (speed 20): same verdict, onset minute,
+  closed second and CONTAINED second. The alert is raised 4.5 s later in the replay than
+  live (+910.0 vs +905.5; +969.9 vs +965.5): by minute 15 the live ring files had drifted
+  4.5 s from the replay's even 10-s cuts. A display-time difference only; session 07 (the
+  practised rung 2) has none.
+- Fix: the stray "›" left of "Severity rule" and "Attack techniques seen" was Streamlit's
+  "open the sidebar" button, fixed to the window corner while the page scrolls under it
+  (at the top it sat on the "o" of the title). It stays (it opens the Alert sound switch);
+  `theme.CSS` gives it its own left margin. Checked in Edge at 1366 x 768, top and scrolled;
+  the button still opens the sidebar. `tests/test_p6.py`.
+- Real attacks named correctly under today's rules: 22 of 22 (12 batch, 2 rehearsals,
+  8 live). Hardware sessions under today's rules: 9 (rehearsal_02 + 8 live), all correct.
+- Tagged `demo-ready`. **The code is frozen**: no code changes unless Muheeb asks.
 
 ## 5. Left out on purpose
 

@@ -72,7 +72,7 @@ Other commands you may be asked about:
 | `python -m src.incident live_session_07 --pdf` | Rebuilds the incident report for a saved session, as HTML and PDF. |
 | `python -m src.evaluate ...` | Scores the method against the answer files. It is the **only** program allowed to open them. |
 | `python -m src.generate --runs 30` | Makes simulated incidents with a known answer (the benchmark). |
-| `python -m pytest` | Runs all the tests (720 passed, 6 skipped at P5b). |
+| `python -m pytest` | Runs all the tests (732 passed, 6 skipped at P6). |
 
 ---
 
@@ -238,7 +238,7 @@ device has a new repeating destination, medium otherwise.
 
 **The system never blocks anything.** A person pulls the board's power. The engine then
 watches for the attack's connections. After **90 seconds with none** (three missed beacons)
-it says "Contained at hh:mm:ss". This was confirmed for real in all 6 live sessions.
+it says "Contained at hh:mm:ss". This was confirmed for real in all 8 live sessions.
 
 ---
 
@@ -275,14 +275,16 @@ it says "Contained at hh:mm:ss". This was confirmed for real in all 6 live sessi
 
 | What | Result | Where from |
 |---|---|---|
-| Live hardware sessions | 6 of 6 named the right board, at 100% | `results/table_live_sessions.csv` |
-| Alert after the attack started | 3 min 16 s to 3 min 54 s | live sessions + rehearsal_02 |
+| Live hardware sessions | 8 of 8 named the right board, at 100% (9 of 9 with rehearsal_02) | `results/table_live_sessions.csv` |
+| All real attacks | 22 of 22 named the right board (12 batch, 2 rehearsals, 8 live) | the live tables in `results/` |
+| Alert after the attack started | 2 min 37 s to 3 min 54 s (all but session 08: 3 min 16 s or more) | live sessions + rehearsal_02 |
 | Contained after the alert | 1 min 21 s to 2 min 14 s, including the person's reaction | same |
 | Real 12-attack batch | 12 of 12 (old rule 11 of 12) | `results/table_live_fixed.csv` |
 | False alarms | 0 in 24 attack-free 25-minute sessions (old rule: 1) | `results/false_alarms_fixed.csv` |
 | Hard simulated benchmark | V5 56.7% top-1, 90% top-3; "first to go odd" 17% | `results/table1.csv` |
-| "Blame the biggest sender" on real attacks | 0% | same tables |
-| AI summary | gemini-3.6-flash: 6 of 6 passed the fact check, 1.6-5.2 s each (one call a minute, as in a session) | P5b measurement |
+| "Blame the biggest sender" on real attacks | 0 of 22 | same tables |
+| "Blame the strangest device" on real attacks | 1 of 22 (live_session_08 only) | same tables |
+| AI summary | gemini-3.6-flash: 6 of 6 passed the fact check, 1.6-5.2 s each (one call a minute, as in a session); in sessions 08-09, 4 of 4 real calls passed, 2.1-4.1 s | P5b measurement; sessions' `state.json` |
 
 ---
 
@@ -290,10 +292,12 @@ it says "Contained at hh:mm:ss". This was confirmed for real in all 6 live sessi
 
 **"Isn't this just anomaly detection?"** Anomaly detection is the first stage. It says
 *something* is odd. Our contribution is the second stage: *where it started*. On real attacks,
-"blame the strangest device" was right 0 times in 20, because the noisy laptop always looks
-strange.
+"blame the strangest device" was right once in 22, because the noisy laptop usually looks
+stranger than the attacked board. (The one hit, session 08: the board's learned normal
+happened to be perfectly flat, so its first beacon looked extreme.)
 
-**"Why does it take four minutes?"** It waits for three unusual minutes in a row, on purpose.
+**"Why does it take four minutes?"** It waits for three unusual minutes in a row, on purpose
+(measured 2 min 37 s to 3 min 54 s).
 Blaming the wrong device is worse than being late: someone would unplug a healthy machine.
 
 **"What if the AI makes something up?"** It cannot get past the checker. Every name, time and
