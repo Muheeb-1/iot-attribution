@@ -50,7 +50,9 @@ def test_the_model_gets_only_facts_that_do_not_change_minute_to_minute():
     facts = analyst.analyst_facts(state["incident"], state["addresses"])
     assert set(facts) <= {"device", "device_address", "first_unusual_connection",
                           "first_connection_id", "destination", "port", "interval_seconds",
-                          "bytes_sent_each_time", "bytes_received_each_time", "new_destination"}
+                          "bytes_sent_each_time", "bytes_received_each_time", "new_destination",
+                          # P5: whether the timer is regular, and who else was flagged
+                          "timing", "other_devices_abnormal"}
     assert facts["device"] == "esp32-03" and facts["destination"] == "192.168.0.200:4444"
     assert facts["interval_seconds"] == 30 and facts["bytes_sent_each_time"] == 496
     text = json.dumps(facts)

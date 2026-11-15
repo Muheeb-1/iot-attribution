@@ -1518,12 +1518,32 @@ def write_pdf(report: dict, reports_dir: Path = REPORTS_DIR) -> Path | None:
 # Command line: a report for a saved run
 # --------------------------------------------------------------------------
 
+LIVE_SESSIONS_DIR = ROOT / "pcap" / "live"
+
+
 def report_for_run(run_id: str, pcap=None, llm: str | None = None) -> dict:
-    """The report for a saved run, as the offline pipeline sees it."""
+    """
+    The report for a saved run, as the offline pipeline sees it.
+
+    For a run the live engine saved (its meta has a "live" part), the report
+    also carries what only the engine measured at the time: its CONTAINED
+    check, the SHA-256 list of the capture files, the operator's
+    acknowledgement, and the devices' IP addresses from its last state.json
+    (Step P5 - this is how the saved reports in reports/ are re-created in the
+    new design). The verdict, onsets and every number still come from the
+    pipeline run here over the saved data.
+    """
     run = runs.load_run(run_id)
     meta = json.loads(runs.meta_path(run_id).read_text(encoding="utf-8"))
     start = meta.get("capture_start_epoch")
-    addresses, evidence = {}, {}
+    saved_live = meta.get("live") or {}
+    addresses, evidence = {}, dict(saved_live.get("evidence") or {})
+    state_file = LIVE_SESSIONS_DIR / run_id / "state.json"
+    if saved_live and state_file.is_file():
+        try:
+            addresses = dict(json.loads(state_file.read_text(encoding="utf-8")).get("addresses") or {})
+        except (OSError, ValueError):
+            addresses = {}
     if pcap:
         pcap = Path(pcap)
         packets = capture.read_packets(pcap, capture.find_tshark())
@@ -1533,9 +1553,14 @@ def report_for_run(run_id: str, pcap=None, llm: str | None = None) -> dict:
         evidence = {"folder": str(pcap), "file": str(pcap), "sha256": sha256_of(pcap), "files": 1}
     detection = detect.detect_run(run)
     result = attribute.attribute_run(run, detection)
-    first_alert = (meta.get("live") or {}).get("first_alert")
+    first_alert = saved_live.get("first_alert")
     report = build_incident(run, detection, result, capture_start_epoch=start,
-                            first_alert=first_alert, addresses=addresses, evidence=evidence)
+                            first_alert=first_alert, addresses=addresses, evidence=evidence,
+                            containment=saved_live.get("containment"),
+                            session_folder=None if pcap else
+                            (saved_live.get("evidence") or {}).get("folder"))
+    if saved_live.get("acknowledged"):
+        report = with_acknowledgement(report, saved_live["acknowledged"])
     if llm and report["status"] != "no incident":
         from src import report as brief_module
         ev = brief_module.build_evidence(run, detection, result)

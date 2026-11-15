@@ -286,6 +286,41 @@ P4 as built (15 Nov 2026):
   shown beside the console.
 - README and CLAUDE.md brought up to date.
 
+P5 as built (15 Nov 2026):
+- The interpreting prompt (`analyst.PROMPT_P5`): what a small, same-size message to a new
+  address on a fixed timer usually means, why it matters, whether another device changed,
+  one thing to check next; no contents, attacker or method may be invented. The facts gain
+  `timing` (machine-regular, same rule as T1029) and `other_devices_abnormal` ("none" or
+  the list). The check gains a rule against claims the measurements cannot show
+  (passwords, credentials, stolen data, botnet, nation-state, ...); a flagged device may be
+  named. Measured with 10 real calls, one attempt each (5 x live_session_07, 5 x _03
+  facts): **7 of 10 passed**, 1.9-9.0 s each (median 4.3 s over all ten). All 7 answers that
+  came back passed the check; the 3 failures came back within 0.6-0.8 s with no answer (the
+  server refused the request; most likely the free tier's rate limit - the code was not
+  recorded then and is now: "HTTP 429"). By the rule set beforehand (keep only if at least
+  8 of 10 pass) **`PROMPT_P4` stays live**; `PROMPT_P5` is kept in the file, and the 10
+  results in `tests/fixtures/analyst_p5_trial.json`. Switching needs a new measurement and
+  Muheeb's approval.
+- Saved reports: `reports/` was never in git (gitignored since Step 19), so the old-design
+  files were copied to `reports/old_design/` (also gitignored) before
+  `python -m src.incident live_session_0N --pdf` re-created 01, 02, 03, 04, 05 and 07 (06 was
+  aborted and has no report) as HTML + 2-page PDF, template wording. `report_for_run` now
+  carries a saved live session's own CONTAINED check, evidence list, acknowledgement and
+  addresses. Checked per session against the engine's own final report
+  (`pcap/live/<session>/state.json`), the saved meta and the scored tables: named device,
+  confidence, flagged set, onset, first unusual connection, alert second (also = meta),
+  time to detect, beacon destination and count, CONTAINED moment and status, flagged set
+  and confidence = `table_live_sessions_per_run.csv`, V5 rank 1, contained clock =
+  `table_live_sessions_timing.csv` - no mismatch in any of the six.
+- `.gitignore`: data/, pcap/live/ and reports/ demo_* and test_* are never committed (the
+  old "frozen demo run" exception for data/demo_* was removed - none was ever committed).
+  Nothing was deleted.
+- `docs/HOW_IT_WORKS.md` (new, for the viva) and `docs/LIVE_DEMO.md` version 2 (final build:
+  Muheeb's broker command, the Administrator `Set-ExecutionPolicy` line, `--llm cloud`, the
+  sound-switch click, Acknowledge, Create/Download PDF, the attacker's window beside the
+  console, the ladder with the new rung 4). README and CLAUDE.md brought up to date.
+- Tests: `tests/test_p5.py`.
+
 ### P6 - two dress rehearsals on the hardware, then freeze
 - `rehearsal_03` (esp32-02) and `rehearsal_04` (esp32-03), following `docs/LIVE_DEMO.md`
   word for word, with sound, Acknowledge, unplug, CONTAINED, PDF. In one of them also do

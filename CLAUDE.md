@@ -117,6 +117,26 @@ Windows 11 laptop, VS Code, PowerShell, Python 3.12 in `.venv`.
   a score: `tests/test_polish_invariant.py` (added in P1) replays live_session_07 and _03 through the live
   path after every step, and `git diff --exit-code results/` must stay clean.
 
+## Status - 15 Nov 2026, polish P1-P5 done (tags polish-p1 ... polish-p5)
+
+- P1/P1b console + theme (`dashboard/theme.py`); P2 alert (ring, Acknowledge -> ack.json,
+  tone, to detect / acknowledge / contain); P3 designed report (`incident.render_html`,
+  `design_facts`; severity, incident_id, ATT&CK techniques; addresses shown, never
+  "broker:4444" - display only) + PDF via Edge (`incident.html_to_pdf`, engine at STOP,
+  page Create/Download PDF); P4 AI analyst (`src/analyst.py`, `--llm cloud`, checked by
+  `report.validate_brief`; template wording when offline); P5 documents
+  (`docs/HOW_IT_WORKS.md`, `docs/LIVE_DEMO.md` v2), saved reports 01-07 re-created in the new
+  design (`python -m src.incident <session> --pdf`; old ones in gitignored
+  `reports/old_design/` - reports/ was never in git), test outputs (demo_*, test_*) gitignored.
+- P5 interpreting prompt (`analyst.PROMPT_P5`): 7/10 real calls passed (3 refused by the
+  server, all 7 answers passed) -> NOT live by the 8/10 rule; `PROMPT_P4` stays live. Do not
+  switch without a new measurement and Muheeb's approval.
+- Tests: 693+ passed, 6 skipped. `tests/conftest.py` sets IOT_NO_CLOUD=1 and WRITE_PDF off for
+  the WHOLE session (never reach the real cloud from a test). Scoring is re-run into a scratch
+  folder and compared; `results/table1_per_run.csv` and `table_live_per_run.csv` are left as
+  they are (a re-run only adds the Step 18 columns).
+- Next: P6 (two dress rehearsals on hardware, then tag `demo-ready` and freeze). Not started.
+
 ## Now - final phase, approved 11 Nov 2026
 
 - Deadline: working and rehearsed by Saturday 14 Nov, end of day. Saturday is rehearsal only.
@@ -201,9 +221,9 @@ python -m src.evaluate [--rules old] --false-alarms pcap/baseline.pcapng pcap/ba
 python -m src.evaluate --prefix live_session --label live-sessions --runs <N> --out results/table_live_sessions.csv
 #   ...and without a noted session (same set minus one): add --exclude live_session_02 --label "live-sessions (laptop loop on)" --out results/table_live_sessions_loop_on.csv
 python -m src.reconvert                               # fallback rung 3: re-convert the real captures into lab_* runs (needs the pcaps)
-python -m src.live --session <name> [--replay <pcap>] [--speed 20]   # live engine (Step 15)
+python -m src.live --session <name> [--replay <pcap>] [--speed 20] [--llm cloud]   # live engine (Step 15; AI summary P4)
 python -m src.live_capture --session <name>          # ADMINISTRATOR terminal: the capture
-python -m src.incident <run_id> [--pcap <file>] [--llm local|cloud]   # full report -> reports/<run_id>.html
+python -m src.incident <run_id> [--pcap <file>] [--llm local|cloud] [--pdf]   # report -> reports/<run_id>.html (+ .pdf)
 python -m src.capture pcap\<file>.pcapng --run <run_id> --baseline 720
 streamlit run dashboard/app.py
 python -m src.listener                                # beacon sink, on the master laptop

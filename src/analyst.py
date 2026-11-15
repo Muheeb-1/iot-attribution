@@ -68,7 +68,7 @@ MODEL = report.CLOUD_MODEL
 LIMIT_SECONDS = 25.0          # per attempt
 ATTEMPTS = 2                  # one try, one retry
 STOP_BUDGET_SECONDS = 25.0    # the whole ask at STOP
-MAX_SENTENCES = 3
+MAX_SENTENCES = 3             # PROMPT_P5 needs 5 and 900 characters (see SYSTEM_PROMPT)
 MAX_CHARACTERS = 600
 
 # statuses of an analyst record
@@ -79,7 +79,9 @@ UNREACHABLE = "unreachable"    # no answer: offline, timeout, HTTP error
 NO_KEY = "no key"              # API_KEY.env missing or has no key line
 
 
-SYSTEM_PROMPT = """You are the analyst on a network security console. Write the \
+# The P4 prompt: restates the measurements. Kept for the record (Step P5
+# measured the new one against the same check before replacing it).
+PROMPT_P4 = """You are the analyst on a network security console. Write the \
 "Analyst summary" of one incident for a person who is not a security expert.
 
 RULES:
@@ -91,6 +93,46 @@ address and port, how often it connected and how many bytes it sent each time \
 - Write the time, address and numbers exactly as given.
 - Do NOT give counts of connections, packets or minutes, scores, confidence \
 levels, or anything about other devices. Do NOT recommend actions."""
+
+# The P5 prompt: interprets the measured pattern - what a small, same-size
+# message to a new address on a fixed timer usually means, why it matters,
+# whether any other device changed, and one thing to check next - without
+# inventing contents, an attacker or a method. Measured on 15 Nov 2026 with
+# 10 real calls (live_session_07 and _03 facts); see docs/POLISH_PLAN.md, P5.
+PROMPT_P5 = """You are the analyst on a network security console. Write the \
+"Analyst summary" of one incident for a site manager who is not a security expert.
+
+Write 3 to 5 short, plain sentences that:
+1. Say what the device did: from the time of its first unusual connection it \
+connected to the destination address and port on a fixed timer, sending a small \
+message of about the same size each time, to an address it never used while its \
+normal behaviour was being learned.
+2. Explain what that pattern usually means: a small, same-size message sent on a \
+fixed timer to a new address is the typical sign of a compromised device checking \
+in or reporting to a server that someone else controls (often called beaconing).
+3. Say why it matters: whoever receives these messages may be able to collect \
+data from the device or send it commands.
+4. Say whether any other device changed its behaviour, using the facts given.
+5. Suggest ONE thing to check next, such as what is listening at the destination \
+address, or whether the device's firmware has been changed.
+
+STRICT RULES:
+- Use ONLY the facts given. Do not guess what the messages contain, who is behind \
+it, or how the device was compromised.
+- Write the time, addresses and numbers exactly as given; add no other times, \
+numbers, devices or addresses.
+- No counts of connections, packets or minutes, no scores, no confidence levels.
+- When you interpret, say "usually", "likely" or "consistent with"; never present \
+the interpretation as proven."""
+
+# WHICH PROMPT IS LIVE. The rule set for P5: keep PROMPT_P5 only if at least
+# 8 of 10 real calls pass. Measured 15 Nov 2026: 7 of 10. All 7 answers that
+# came back passed the check; the 3 failures were the server refusing the
+# request within ~0.6 s (no answer at all - most likely the free tier's rate
+# limit after calls in quick succession; the status code was not recorded
+# then, it is now). By the rule, PROMPT_P4 stays live. To switch after a new
+# measurement: SYSTEM_PROMPT = PROMPT_P5, MAX_SENTENCES = 5, MAX_CHARACTERS = 900.
+SYSTEM_PROMPT = PROMPT_P4
 
 
 # --------------------------------------------------------------------------
@@ -129,6 +171,14 @@ def analyst_facts(report_dict: dict, addresses=None) -> dict | None:
         "bytes_sent_each_time": int(p["typical_bytes_out"]),
         "bytes_received_each_time": int(p["typical_bytes_in"]),
         "new_destination": "never used while its normal behaviour was learned",
+        # P5: whether the timer is machine-regular (spread of the gaps / their
+        # mean below 0.2, the same rule as the T1029 line), and which other
+        # devices were flagged ("none" is a fact too).
+        "timing": ("fixed timer (machine-regular)"
+                   if p.get("gap_cv") is not None and p["gap_cv"] < incident.SCHEDULED_MAX_CV
+                   else None),
+        "other_devices_abnormal": [d for d in report_dict.get("flagged") or [] if d != named]
+                                  or "none",
     }
     return {k: v for k, v in facts.items() if v is not None}
 
@@ -136,6 +186,13 @@ def analyst_facts(report_dict: dict, addresses=None) -> dict | None:
 # --------------------------------------------------------------------------
 # The check: the existing validator, plus the two P4 rules
 # --------------------------------------------------------------------------
+
+# Claims the facts can never support: what the messages contain, who is
+# behind it, a named kind of malware. A summary making one is rejected.
+UNSUPPORTED_CLAIM = re.compile(
+    r"\b(passwords?|credentials?|keylog\w*|ransomware|botnet|trojan|worm|apt\d*|"
+    r"nation[- ]state|state[- ]sponsored|hacker group|stole|stolen|steals?|"
+    r"personal data|camera|microphone)\b", re.I)
 
 RUNNING_COUNT = re.compile(r"\b\d[\d,]*\s+(?:[a-z-]+\s+)?(?:connections?|packets?|beacons?|"
                            r"times|attempts?|minutes?|messages?)\b", re.I)
@@ -157,11 +214,15 @@ def check_summary(summary: str, facts: dict, device_names) -> list:
         problems.append("longer than %d sentences" % MAX_SENTENCES)
     for match in RUNNING_COUNT.findall(text):
         problems.append("states a running count (%r), which changes minute to minute" % match)
+    for match in UNSUPPORTED_CLAIM.findall(text):
+        problems.append("claims %r, which the measurements cannot show" % match)
     lowered = text.lower()
     if facts["device"].lower() not in lowered:
         problems.append("does not name the device %s" % facts["device"])
+    also_flagged = facts.get("other_devices_abnormal")
+    also_flagged = set(also_flagged) if isinstance(also_flagged, list) else set()
     for other in device_names:
-        if other != facts["device"] and re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(other.lower()),
+        if other != facts["device"] and other not in also_flagged and re.search(r"(?<![\w-])%s(?![\w-])" % re.escape(other.lower()),
                                                   lowered):
             problems.append("mentions another device, %s" % other)
 
@@ -247,7 +308,8 @@ def _user_prompt(facts: dict, problems=None) -> str:
 
 def ask(facts: dict, device_names, transport=None, model: str = MODEL,
         attempts: int = ATTEMPTS, limit: float = LIMIT_SECONDS,
-        budget: float | None = None, clock=time.monotonic) -> dict:
+        budget: float | None = None, clock=time.monotonic,
+        system: str | None = None) -> dict:
     """
     Ask once (plus one retry). Returns the analyst record:
       status   ok / rejected / unreachable / no key
@@ -273,9 +335,16 @@ def ask(facts: dict, device_names, transport=None, model: str = MODEL,
                 break
         record["attempts"] = attempt
         try:
-            summary = transport(model, SYSTEM_PROMPT, _user_prompt(facts, problems), timeout)
+            summary = transport(model, system or SYSTEM_PROMPT, _user_prompt(facts, problems),
+                                timeout)
         except Exception as exc:          # noqa: BLE001 - offline, timeout, HTTP error, bad JSON
-            record["problems"].append("attempt %d: no answer (%s)" % (attempt, type(exc).__name__))
+            # Only the exception's class - plus the status code when the
+            # server refused ("HTTP 429"), which cloud_transport puts in its
+            # own message and which never carries the key or the reply body.
+            why = type(exc).__name__
+            if isinstance(exc, RuntimeError) and str(exc).startswith("HTTP "):
+                why += ", " + str(exc)[:12]
+            record["problems"].append("attempt %d: no answer (%s)" % (attempt, why))
             continue
         answered = True
         problems = check_summary(summary, facts, device_names)

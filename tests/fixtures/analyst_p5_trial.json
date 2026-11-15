@@ -1,0 +1,121 @@
+{
+ "measured": "15 Nov 2026, gemini-3.6-flash, PROMPT_P5, one attempt per call",
+ "facts": {
+  "live_session_07": {
+   "device": "esp32-03",
+   "device_address": "192.168.0.203",
+   "first_unusual_connection": "19:30:19",
+   "first_connection_id": "C000450",
+   "destination": "192.168.0.200:4444",
+   "port": 4444,
+   "interval_seconds": 30,
+   "bytes_sent_each_time": 496,
+   "bytes_received_each_time": 170,
+   "new_destination": "never used while its normal behaviour was learned",
+   "timing": "fixed timer (machine-regular)",
+   "other_devices_abnormal": "none"
+  },
+  "live_session_03": {
+   "device": "esp32-02",
+   "device_address": "192.168.0.160",
+   "first_unusual_connection": "17:12:43",
+   "first_connection_id": "C000445",
+   "destination": "192.168.0.200:4444",
+   "port": 4444,
+   "interval_seconds": 30,
+   "bytes_sent_each_time": 496,
+   "bytes_received_each_time": 170,
+   "new_destination": "never used while its normal behaviour was learned",
+   "timing": "fixed timer (machine-regular)",
+   "other_devices_abnormal": "none"
+  }
+ },
+ "calls": [
+  {
+   "session": "live_session_07",
+   "call": 1,
+   "status": "ok",
+   "seconds": 7.88,
+   "problems": [],
+   "summary": "Starting at 19:30:19, device esp32-03 (192.168.0.203) began connecting to destination 192.168.0.200:4444 on a fixed 30-second timer, sending 496 bytes each time to an address it never used while its normal behaviour was learned. This pattern of sending small, consistent-sized messages on a strict schedule to a new address is usually consistent with a compromised device beaconing to an external controller. This matters because whoever is receiving these messages may likely be able to send commands to esp32-03 or collect data from it. No other device changed its behaviour during this incident. As a next step, check what service is listening at destination address 192.168.0.200 on port 4444."
+  },
+  {
+   "session": "live_session_07",
+   "call": 2,
+   "status": "ok",
+   "seconds": 6.41,
+   "problems": [],
+   "summary": "Starting at 19:30:19, the device esp32-03 (192.168.0.203) connected to 192.168.0.200:4444 on a fixed timer every 30 seconds, sending 496 bytes each time to a destination it never used while its normal behaviour was being learned. Sending a small, consistent-sized message on a fixed timer to a new address is usually consistent with a compromised device beaconing to an outside controller. This matters because whoever is receiving these messages may be able to collect data from esp32-03 or send commands to it. Based on the facts provided, no other device changed its behaviour. A recommended next step is to check what service or software is listening at 192.168.0.200:4444."
+  },
+  {
+   "session": "live_session_07",
+   "call": 3,
+   "status": "ok",
+   "seconds": 8.97,
+   "problems": [],
+   "summary": "Starting at 19:30:19, device esp32-03 (192.168.0.203) connected to 192.168.0.200:4444 on a fixed timer every 30 seconds, sending 496 bytes and receiving 170 bytes each time, to an address it never used while its normal behaviour was being learned. This pattern of small, same-sized messages sent on a fixed timer to a new address is usually consistent with a compromised device checking in or reporting to a server controlled by someone else. This matters because whoever receives these messages may likely be able to collect data from esp32-03 or send it commands. No other device changed its behaviour during this time. A recommended next step is to check what is listening at destination address 192.168.0.200:4444."
+  },
+  {
+   "session": "live_session_07",
+   "call": 4,
+   "status": "ok",
+   "seconds": 5.92,
+   "problems": [],
+   "summary": "Starting at 19:30:19, device esp32-03 (192.168.0.203) connected to 192.168.0.200:4444 on a fixed timer every 30 seconds, sending 496 bytes each time to a destination it never used while its normal behaviour was learned. Sending small, similar-sized messages on a fixed schedule to a new address is usually consistent with a compromised device beaconing to an external controller. This matters because the party receiving these connections may be able to gather data from esp32-03 or issue commands to it. No other devices changed their behaviour during this incident. A recommended next step is to investigate what service is listening at 192.168.0.200 on port 4444."
+  },
+  {
+   "session": "live_session_07",
+   "call": 5,
+   "status": "ok",
+   "seconds": 4.34,
+   "problems": [],
+   "summary": "Starting at 19:30:19, device esp32-03 (192.168.0.203) began connecting to 192.168.0.200:4444 on a fixed timer, sending a small message of 496 bytes each time to an address it never used while its normal behaviour was being learned. Sending small, similar-sized messages on a fixed schedule to a new destination is usually consistent with a compromised device checking in with an external server. This matters because whoever is receiving these connections may be able to gather data from the device or send commands to it. No other devices changed their behaviour during this incident. As a next step, check what service is listening at 192.168.0.200:4444 or verify whether the device's firmware has been modified."
+  },
+  {
+   "session": "live_session_03",
+   "call": 1,
+   "status": "ok",
+   "seconds": 2.47,
+   "problems": [],
+   "summary": "From 17:12:43, esp32-02 (192.168.0.160) connected to 192.168.0.200:4444 on a fixed timer every 30 seconds, sending 496 bytes each time to an address it never used while its normal behaviour was being learned. Sending a small message of about the same size on a fixed timer to a new address is usually a sign of a compromised device checking in with an external server. This is important because whoever receives these messages may be able to collect data from esp32-02 or send it commands. No other device changed its behaviour during this incident. As a next step, check what is listening at 192.168.0.200:4444 or whether esp32-02's firmware has been changed."
+  },
+  {
+   "session": "live_session_03",
+   "call": 2,
+   "status": "unreachable",
+   "seconds": 0.77,
+   "problems": [
+    "attempt 1: no answer (RuntimeError)"
+   ],
+   "summary": null
+  },
+  {
+   "session": "live_session_03",
+   "call": 3,
+   "status": "ok",
+   "seconds": 1.92,
+   "problems": [],
+   "summary": "Starting at 17:12:43, device esp32-02 at 192.168.0.160 began connecting to 192.168.0.200:4444 on a fixed timer, sending 496 bytes and receiving 170 bytes each time to an address it never used while its normal behaviour was being learned. Sending a small, consistent message on a fixed timer to a new address is usually consistent with a compromised device checking in with a server that someone else controls. This matters because whoever receives these messages may be able to collect data from the device or send it commands. No other devices changed their behaviour. One thing to check next is what is listening at destination address 192.168.0.200:4444."
+  },
+  {
+   "session": "live_session_03",
+   "call": 4,
+   "status": "unreachable",
+   "seconds": 0.66,
+   "problems": [
+    "attempt 1: no answer (RuntimeError)"
+   ],
+   "summary": null
+  },
+  {
+   "session": "live_session_03",
+   "call": 5,
+   "status": "unreachable",
+   "seconds": 0.62,
+   "problems": [
+    "attempt 1: no answer (RuntimeError)"
+   ],
+   "summary": null
+  }
+ ]
+}

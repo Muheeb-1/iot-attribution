@@ -10,9 +10,14 @@ team of four. Python 3.12 on Windows 11.
 Status (13 Nov 2026): Steps 1-22 done. The live system has been tested on the real
 lab hardware in 6 fresh attack sessions plus one rehearsal. It named the right board
 at 100% confidence in all 7. The alert came 3 min 16 s to 3 min 54 s after the
-attack started, and every containment was confirmed from the traffic. Step 23
-(visual redesign) is recorded but not started. How to run the demo:
-[`docs/LIVE_DEMO.md`](docs/LIVE_DEMO.md).
+attack started, and every containment was confirmed from the traffic.
+
+Polish phase (14-15 Nov, tags `polish-p1` to `polish-p5`, core locked at `core-locked`): a
+console in the style of a security product, an alert that rings until acknowledged, a
+designed 2-page incident report with a PDF, and an optional AI analyst summary that is
+fact-checked before it is shown. No verdict or score changed (checked after every step).
+How to run the demo: [`docs/LIVE_DEMO.md`](docs/LIVE_DEMO.md). How it works, for the viva:
+[`docs/HOW_IT_WORKS.md`](docs/HOW_IT_WORKS.md).
 
 ---
 
@@ -122,8 +127,10 @@ traffic, and traffic from a board straight to the internet, would be invisible.
         v
   src/attribute.py    V5: build the story graph, rank the suspects, abstain if unsure
         |
-        +--> src/incident.py   the 8-section incident report (deterministic, no LLM needed)
-        +--> src/report.py     optional LLM wording, checked against the evidence
+        +--> src/incident.py   the incident report: designed 2-page HTML/PDF + 8 technical
+        |                      sections (deterministic, no LLM needed); the CONTAINED check
+        +--> src/analyst.py    optional AI summary (cloud), checked against the facts
+        +--> src/report.py     the evidence validator; optional LLM brief (Past sessions)
         |
         v
   dashboard/app.py         replay page: pick any saved run
@@ -137,6 +144,7 @@ traffic, and traffic from a board straight to the internet, would be invisible.
  src/live.py (the engine)             -> reads each FINISHED file; each time a minute closes,
                                          re-runs the unchanged pipeline on everything so far;
                                          writes pcap/live/<session>/state.json + reports/<session>.html
+                                         (+ .pdf at STOP); --llm cloud adds the AI summary
  dashboard/live_page.py               -> redraws from state.json every 3 s
 ```
 
@@ -152,7 +160,9 @@ create or hide an alarm.
 | `src/capture.py` | Real captures -> the same flow table the simulator writes. |
 | `src/features.py`, `src/detect.py`, `src/attribute.py` | The method (above). |
 | `src/report.py` | The incident brief: pydantic schema, evidence validator, template fallback; `--provider local` (Ollama `llama3.2:3b`) or `cloud` (Gemini). |
-| `src/incident.py` | The 8-section incident report and the CONTAINED check. |
+| `src/incident.py` | The incident report (designed 2-page HTML + PDF via Edge; 8 technical sections), severity, ATT&CK techniques, the CONTAINED check. |
+| `src/analyst.py` | The AI analyst: a short summary from the cloud model, shown only if it passes the fact check. |
+| `dashboard/theme.py` | The console's look: status band, device lanes, report cards. |
 | `src/live.py`, `src/live_capture.py` | Live engine; ring capture (needs Administrator). |
 | `src/scenario.py`, `src/run_attack.py`, `src/listener.py` | Lab tools: one attack + answer file; batch driver; beacon sink. |
 | `src/evaluate.py` | Scores everything against the answers and the four baselines. The **only** reader of `groundtruth/`. |
@@ -161,6 +171,8 @@ create or hide an alarm.
 | `groundtruth/` | The answer files (gitignored). |
 | `docs/LIVE_PLAN.md` | The live-phase plan, decisions, and every measurement (section 7). |
 | `docs/LIVE_DEMO.md` | The demo script for the judges, with the fallback ladder and Q&A. |
+| `docs/HOW_IT_WORKS.md` | Plain-English guide for the viva: the flow, every command and file, the AI, real IDS vs prototype. |
+| `docs/POLISH_PLAN.md` | The polish phase (P1-P6), with what was built and measured in each step. |
 
 ## Results
 
@@ -318,7 +330,7 @@ without any language model and cannot fail in a demo**. It has eight sections:
 2. **When** - first unusual connection, each abnormal minute, alert time, time to detect.
 3. **Where it started** - named device, confidence, full ranking, the devices that stayed normal.
 4. **How** - the new behaviour, measured. On every real capture this comes out as exactly one
-   pattern: `broker:4444`, every ~30 s, ~496 bytes.
+   pattern: `192.168.0.200:4444` (the master laptop's beacon sink), every ~30 s, ~496 bytes.
 5. **Why we believe it** - per-minute score against the threshold, what moved, evidence connection ids.
 6. **Impact** - the affected device(s) and everything they talked to.
 7. **What to do** - contain (exact MAC, IP, port), preserve evidence (session files + SHA-256),
@@ -328,9 +340,21 @@ without any language model and cannot fail in a demo**. It has eight sections:
 
 **CONTAINED** is confirmed from the traffic: once the named device has made no connection
 to the section-4 destination for 90 s, the page turns green with the time. Confirmed on real
-containments in all 6 live sessions. The report is shown on the live page (with a download),
-saved as `reports/<session>.html`, and in an expander on the replay page. At STOP a
-`SHA256SUMS.txt` of the capture files is written as the evidence record.
+containments in all 6 live sessions. At STOP a `SHA256SUMS.txt` of the capture files is
+written as the evidence record.
+
+**The designed report** (polish step P3). On the page and on paper the operator sees the
+short version, one light A4 design of two pages at most: incident number, severity
+(a fixed rule: critical if more than one device is flagged, high if one device has a new
+repeating destination, medium otherwise), confidence, contained or not, four key facts
+(origin, to detect, to acknowledge, to contain), a summary, the timeline, how it was found,
+why we believe it, the MITRE ATT&CK techniques the pattern is *consistent with* (T1571
+Non-Standard Port, T1029 Scheduled Transfer, T1041 Exfiltration Over C2 Channel, each
+from its own measured rule), what to do, and evidence and limits. The 8 sections are kept
+underneath as "Full technical detail". The engine saves `reports/<session>.html` and, at
+STOP, `reports/<session>.pdf` (printed by the Edge that Windows 11 already has; ~3 s). The
+live page has Create PDF / Download PDF. `python -m src.incident <session> --pdf` re-creates
+a saved session's report.
 
 **Optional LLM wording** (`src/report.py`). Language models invent things, so two guards
 sit around it:
@@ -355,7 +379,11 @@ retry; asked once more at STOP). It is given only facts that do not change minut
 answer is shown only if it passes `report.validate_brief` plus two extra rules (no running
 counts, no other device). Otherwise the page and the report say "Template wording - the AI
 analyst was not reachable" and show the template's sentences. The verdict, the numbers and
-the playbook never come from the model, and the engine never waits for it.
+the playbook never come from the model, and the engine never waits for it. A second prompt
+that also *interprets* the pattern (what a small fixed-size message on a timer usually means,
+why it matters, one thing to check next) was measured in P5: 7 of 10 real calls passed - every
+answer that came back passed the check, 3 requests were refused by the server - so by the rule
+set beforehand (8 of 10) it is kept in `src/analyst.py` as `PROMPT_P5` but is not live.
 
 **What leaves the laptop** when the cloud model is used (the AI analyst, or the Past sessions
 page's cloud writer): device names, MAC and IP addresses, ports, clock times, byte counts and
@@ -376,7 +404,8 @@ The tests that need real captures or answer files skip cleanly when those are ab
 (pcaps, `data/` and `groundtruth/` are gitignored). Also needed for real captures:
 Wireshark (tshark, dumpcap, editcap, mergecap) with Npcap. For the lab: Mosquitto
 and the Arduino IDE with the ESP32 core. Optional: Ollama with `llama3.2:3b` for local
-LLM wording, or a Gemini key in `API_KEY.env` (never committed) for `--provider cloud`.
+LLM wording, or a Gemini key in `API_KEY.env` (never committed) for the AI analyst
+(`python -m src.live ... --llm cloud`) and the Past sessions page's cloud writer.
 
 ## Running it
 
@@ -386,28 +415,32 @@ LLM wording, or a Gemini key in `API_KEY.env` (never committed) for `--provider 
 streamlit run dashboard/app.py
 ```
 
-Opens at <http://localhost:8501>. Pick a run, and the full analysis runs for real: the
-network with the attack path in red, the timeline of when each device went abnormal, the
-ranked suspects, the incident report, and a "reveal the true answer" tick. The sidebar's
-"Live monitor" opens the live page. If the real captures have not been re-converted on
-this machine, run `python -m src.reconvert` once (needs the pcaps).
+Opens at <http://localhost:8501> on the **Live monitor**; the top bar's **Past sessions**
+opens the replay page. Pick a run, and the full analysis runs for real: the network with the
+attack path in red, the timeline of when each device went abnormal, the ranked suspects, the
+incident report, and "Compare with the recorded answer" in the collapsed Lab validation
+section. If the real captures have not been re-converted on this machine, run
+`python -m src.reconvert` once (needs the pcaps).
 
 **Live mode** - the full order, timings and fallbacks are in [`docs/LIVE_DEMO.md`](docs/LIVE_DEMO.md):
 
 ```powershell
 python -m src.listener                               # beacon sink ("the attacker")
-streamlit run dashboard/app.py                       # then "Live monitor" in the sidebar
-python -m src.live --session live_session_08         # the engine (ordinary terminal)
+streamlit run dashboard/app.py                       # opens on the Live monitor
+python -m src.live --session live_session_08 --llm cloud   # the engine (ordinary terminal)
 python -m src.live_capture --session live_session_08 # the capture (ADMINISTRATOR terminal)
-# ...12-minute baseline, page says "safe to launch the attack"...
+# ...12-minute baseline, then the green band "Monitoring 3 devices"...
 python -m src.scenario --run live_session_08 --origin esp32-03
 ```
 
 Without the lab, the same page can be driven by a recording:
 
 ```powershell
-python -m src.live --session replay_demo_01 --replay pcap\live\live_session_07.pcapng --speed 20
+python -m src.live --session replay_demo_01 --replay pcap\live\live_session_07.pcapng --speed 20 --llm cloud
 ```
+
+Leave out `--llm cloud` (or switch the internet off) and the summary is the template's,
+labelled as such; everything else is identical.
 
 **Scoring** (PowerShell, repo root):
 
@@ -419,7 +452,7 @@ python -m src.evaluate --prefix rehearsal --label rehearsal --runs 2 --pcap-dir 
 python -m src.evaluate --false-alarms pcap/baseline.pcapng pcap/baseline2.pcapng --out results/false_alarms_fixed.csv
 python -m src.evaluate --prefix live_session --label live-sessions --runs 7 --out results/table_live_sessions.csv
 python -m src.evaluate --prefix live_session --label "live-sessions (laptop loop on)" --runs 7 --exclude live_session_02 --out results/table_live_sessions_loop_on.csv
-python -m src.incident live_session_07               # rebuild one incident report -> reports/live_session_07.html
+python -m src.incident live_session_07 --pdf         # rebuild one incident report -> reports/live_session_07.html + .pdf
 ```
 
 Add `--rules old` or `--rules step18` to any real-capture line to reproduce the earlier rule.
@@ -490,4 +523,7 @@ and measurements for Steps 15-22 are in `docs/LIVE_PLAN.md`.
 | 20 | Fresh sessions on hardware; timing table; fallback rung 3 (`src/reconvert.py`) | first real containment |
 | 21 | Sessions 01-07 scored; aborted-session handling; this README; `docs/LIVE_DEMO.md` | 6/6 top-1, 100% |
 | 22 | Realistic stolen-data beacon (firmware re-flashed), readable listener | beacon unchanged on the wire |
-| 23 | Visual redesign of the dashboard | recorded, **not started** |
+| P1-P2 | Polish: the console (status band, device lanes), the alert (ring, Acknowledge, tone, response times) | no verdict or score changed |
+| P3 | Polish: designed 2-page report + PDF; severity, incident id, ATT&CK techniques; addresses shown, not "broker" | PDF ~3 s with Edge |
+| P4 | Polish: the AI analyst (cloud), fact-checked; template wording when offline | 2-9 s per call |
+| P5 | Polish: documents; saved reports re-created in the new design; a prompt that interprets, measured and not adopted (7/10) | |

@@ -37,10 +37,9 @@ groundtruth/*.json
 results/*.csv
 results/*.json
 
-# ...except the frozen demo run, which IS committed so the dashboard's
-# replay mode always works with nothing connected.
-!data/demo_*.parquet
-!data/demo_*.meta.json
+# (There used to be an exception here for a "frozen demo run" in data/demo_*.
+# None was ever committed, and data/demo_* now holds the polish phase's test
+# replays - see "Test outputs" below.)
 !groundtruth/demo_*.json
 !results/demo_*.json
 
@@ -77,3 +76,14 @@ pcap/
 # The Gemini API key lives here. Never commit it.
 API_KEY.env
 *.env
+
+# ---- Test outputs (polish phase, P5) ----
+# Replays made to look at a step (`--session demo_pN`, `test_*`) are scratch,
+# not results: never committed. pcap/ and reports/ are ignored as a whole
+# already; the lines are repeated so the rule is visible in one place.
+data/demo_*
+data/test_*
+pcap/live/demo_*
+pcap/live/test_*
+reports/demo_*
+reports/test_*
